@@ -95,6 +95,50 @@ export async function hasFreshFillsCache(key: string): Promise<boolean> {
   return (await getFillsCache(key)) !== null;
 }
 
+/**
+ * Find a cached entry whose date range is a superset of the requested range.
+ * e.g. if 14d is cached and 7d is requested, the 14d entry covers it.
+ * Returns the smallest fresh superset, or null.
+ */
+export async function findSupersetCache(
+  slug: string,
+  requestedFrom: string,
+  requestedTo: string
+): Promise<CachedFillsEntry | null> {
+  try {
+    const db = await openDb();
+    return new Promise<CachedFillsEntry | null>((resolve, reject) => {
+      const tx = db.transaction(STORE, 'readonly');
+      const req = tx.objectStore(STORE).openCursor();
+      let best: CachedFillsEntry | null = null;
+
+      req.onsuccess = () => {
+        const cursor = req.result;
+        if (!cursor) { resolve(best); return; }
+
+        const key = cursor.key as string;
+        const entry = cursor.value as CachedFillsEntry;
+
+        if (
+          key.includes(`slug=${slug}&`) &&
+          isFresh(entry) &&
+          entry.from <= requestedFrom &&
+          entry.to >= requestedTo
+        ) {
+          // Prefer the smallest covering range
+          if (!best || entry.from > best.from || entry.to < best.to) {
+            best = entry;
+          }
+        }
+        cursor.continue();
+      };
+      req.onerror = () => reject(req.error);
+    });
+  } catch {
+    return null;
+  }
+}
+
 /** Wipe the entire fills cache (useful when aggregation logic changes). */
 export async function clearFillsCache(): Promise<void> {
   try {

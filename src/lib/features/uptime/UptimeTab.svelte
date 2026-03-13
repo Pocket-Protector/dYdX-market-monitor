@@ -6,6 +6,7 @@
   import PctCell from '$lib/shared/components/PctCell.svelte';
   import ErrorBanner from '$lib/shared/components/ErrorBanner.svelte';
   import EmptyState from '$lib/shared/components/EmptyState.svelte';
+  import ProgressLoader from '$lib/shared/components/ProgressLoader.svelte';
   import TableSkeleton from '$lib/shared/components/skeletons/TableSkeleton.svelte';
   import type { UptimeTicker } from '$lib/shared/sla/types';
 
@@ -25,19 +26,34 @@
   }: { slug: string; from: string; to: string; bpsLeeway: number } = $props();
 
   let leeway = $state(0);
-  let loadedKey = $state<string | null>(null);
   let isApplyingLeeway = $state(false);
   let commitTimer: ReturnType<typeof setTimeout> | null = null;
   let showBid = $state(false);
   let showAsk = $state(false);
   const showCombined = true;
   let collapsedGroups = $state<Record<string, boolean>>({});
+  let progressStartedAt = $state<number | null>(null);
+  let progressNow = $state(Date.now());
+  let progressKey = $state('');
 
   const activeLeeway = $derived(parseFloat($page.url.searchParams.get('leeway') ?? String(bpsLeeway)));
+  const requestedLeeway = $derived(Number.isFinite(activeLeeway) ? activeLeeway : bpsLeeway);
 
   $effect(() => {
-    leeway = Number.isFinite(activeLeeway) ? activeLeeway : bpsLeeway;
+    leeway = requestedLeeway;
   });
+
+  function normalizeLeeway(value: number): number {
+    return Math.max(0, Math.min(0.5, Math.round(value * 20) / 20));
+  }
+
+  function sameLeeway(a: number, b: number): boolean {
+    return Math.abs(a - b) < 0.0001;
+  }
+
+  function formatLeeway(value: number): string {
+    return `${(value * 100).toFixed(0)}%`;
+  }
 
   function onLeewayInput(e: Event) {
     const val = parseFloat((e.target as HTMLInputElement).value);
@@ -51,10 +67,10 @@
   }
 
   function commitLeeway() {
-    const normalized = Math.max(0, Math.min(0.5, Math.round(leeway * 20) / 20));
+    const normalized = normalizeLeeway(leeway);
     leeway = normalized;
 
-    if (normalized === activeLeeway) {
+    if (sameLeeway(normalized, requestedLeeway)) {
       isApplyingLeeway = false;
       return;
     }
@@ -76,25 +92,72 @@
     if (commitTimer) clearTimeout(commitTimer);
   });
 
-  const uptimeKey = $derived(`/api/uptime/${slug}?from=${from}&to=${to}&bpsLeeway=${activeLeeway}`);
+  const uptimeKey = $derived(`/api/uptime/${slug}?from=${from}&to=${to}&bpsLeeway=${requestedLeeway}`);
 
   const { data, error, isLoading } = useSWR<UptimePayload>(
     () => uptimeKey,
     { refreshInterval: 60_000, dedupingInterval: 1_800_000 }
   );
 
+  const freshData = $derived.by(() => {
+    if (!$data) return null;
+    if ($data.mm !== slug) return null;
+    if ($data.from !== from || $data.to !== to) return null;
+    if (!sameLeeway($data.bpsLeeway, requestedLeeway)) return null;
+    return $data;
+  });
+
   $effect(() => {
-    if ($data) {
-      loadedKey = uptimeKey;
-      if (loadedKey === uptimeKey) isApplyingLeeway = false;
+    if (freshData) {
+      isApplyingLeeway = false;
     }
   });
 
-  const isPending = $derived($isLoading || loadedKey !== uptimeKey || isApplyingLeeway);
+  const isPending = $derived($isLoading || isApplyingLeeway || !freshData);
+  const showSkeleton = $derived(!$error && !freshData);
+  const showRefreshOverlay = $derived(Boolean(freshData) && isPending);
+  const progressEstimateMs = $derived(showSkeleton ? 6_000 : 3_500);
+  const progressElapsedMs = $derived(progressStartedAt == null ? 0 : Math.max(0, progressNow - progressStartedAt));
+  const progressElapsedLabel = $derived.by(() => {
+    if (!isPending || progressStartedAt == null) return '';
+    const totalSeconds = Math.max(1, Math.floor(progressElapsedMs / 1000));
+    return `${totalSeconds}s elapsed`;
+  });
+  const progressLabel = $derived(showSkeleton ? 'Applying bps leeway...' : 'Refreshing uptime data...');
+  const progressDetail = $derived.by(() => {
+    if (showSkeleton) {
+      return `Recomputing uptime with ${formatLeeway(requestedLeeway)} leeway. Estimate: about ${Math.ceil(progressEstimateMs / 1000)}s.`;
+    }
+
+    return 'Refreshing the current uptime snapshot in the background.';
+  });
+
+  $effect(() => {
+    if (!isPending) {
+      progressStartedAt = null;
+      progressKey = '';
+      return;
+    }
+
+    const nextKey = `${progressLabel}:${slug}:${from}:${to}:${requestedLeeway}`;
+    if (nextKey !== progressKey) {
+      progressKey = nextKey;
+      progressStartedAt = Date.now();
+    }
+  });
+
+  $effect(() => {
+    if (!isPending) return;
+    progressNow = Date.now();
+    const id = setInterval(() => {
+      progressNow = Date.now();
+    }, 250);
+    return () => clearInterval(id);
+  });
 
   const allLevels = $derived(
-    $data
-      ? [...new Set($data.tickers.flatMap((t) => t.levels))].sort()
+    freshData
+      ? [...new Set(freshData.tickers.flatMap((t) => t.levels))].sort()
       : []
   );
 
@@ -104,12 +167,13 @@
   }
 
   const visibleMetricCount = $derived((showBid ? 1 : 0) + (showAsk ? 1 : 0) + 1);
+  const skeletonColumns = $derived(Math.max(5, 1 + visibleMetricCount * 4));
 
   const tickersByGroup = $derived(
-    $data
+    freshData
       ? (() => {
-          const map = new Map<string, typeof $data.tickers>();
-          for (const t of $data.tickers) {
+          const map = new Map<string, typeof freshData.tickers>();
+          for (const t of freshData.tickers) {
             if (!map.has(t.group)) map.set(t.group, []);
             map.get(t.group)!.push(t);
           }
@@ -187,13 +251,22 @@
   </div>
 </div>
 
-{#if $error && !$data}
+{#if $error && !freshData}
   <ErrorBanner message="Failed to load uptime data" />
-{:else if !$data && $isLoading}
-  <TableSkeleton rows={8} columns={6} />
-{:else if !$data}
+{:else if showSkeleton}
+  <div class="space-y-3">
+    <ProgressLoader
+      label={progressLabel}
+      detail={progressDetail}
+      estimatedMs={progressEstimateMs}
+      elapsedMs={progressElapsedMs}
+      elapsed={progressElapsedLabel}
+    />
+    <TableSkeleton rows={8} columns={skeletonColumns} />
+  </div>
+{:else if !freshData}
   <EmptyState message="No uptime data available." />
-{:else if $data.tickers.length === 0}
+{:else if freshData.tickers.length === 0}
   <EmptyState message="No tickers in SLA for this period." hint="Check that SLA configuration is set for this market maker." />
 {:else}
   <div class="relative">
@@ -283,10 +356,17 @@
       </table>
     </div>
 
-    {#if isPending}
+    {#if showRefreshOverlay}
       <div class="pointer-events-none absolute inset-0 rounded bg-zinc-900/55">
-        <div class="absolute right-3 top-3 rounded bg-zinc-900/90 px-2 py-1 text-xs text-violet-300">
-          Refreshing...
+        <div class="absolute left-3 right-3 top-3 max-w-xl">
+          <ProgressLoader
+            compact={true}
+            label={progressLabel}
+            detail={progressDetail}
+            estimatedMs={progressEstimateMs}
+            elapsedMs={progressElapsedMs}
+            elapsed={progressElapsedLabel}
+          />
         </div>
       </div>
     {/if}

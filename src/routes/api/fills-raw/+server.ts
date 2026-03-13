@@ -1,10 +1,14 @@
 /**
- * Thin proxy: paginates the dYdX indexer and returns RAW fills.
- * Aggregation is done client-side (see fillsAggregator.ts) so that
- * future changes to metrics don't require re-fetching from the indexer.
+ * Streaming proxy: paginates the dYdX indexer and streams raw fills
+ * page-by-page as NDJSON so the client gets real-time progress.
+ *
+ * Protocol (one JSON object per line):
+ *   {"t":"p","sub":1,"page":1,"fills":[...]}   — page of fills
+ *   {"t":"d","isCapped":false,"from":"…","to":"…"}  — done
+ *   {"t":"e","error":"…"}                       — error
  */
 
-import { json, error } from '@sveltejs/kit';
+import { error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { getMmBySlug } from '$lib/config/mms';
 import type { IndexerFill } from '$lib/features/fills/types';
@@ -14,50 +18,6 @@ const MAX_PAGES = 20;
 
 interface IndexerFillsResponse {
   fills: IndexerFill[];
-}
-
-async function fetchSubaccountFills(
-  address: string,
-  subaccountNumber: number,
-  from: string,
-  to: string,
-  signal: AbortSignal
-): Promise<{ fills: IndexerFill[]; isCapped: boolean }> {
-  const fills: IndexerFill[] = [];
-  const seen = new Set<string>();
-  let isCapped = false;
-  let createdBeforeOrAt = `${to}T23:59:59.999Z`;
-  const fromTs = `${from}T00:00:00.000Z`;
-
-  for (let page = 0; page < MAX_PAGES; page++) {
-    const url = new URL('https://indexer.dydx.trade/v4/fills');
-    url.searchParams.set('address', address);
-    url.searchParams.set('subaccountNumber', String(subaccountNumber));
-    url.searchParams.set('limit', String(PAGE_LIMIT));
-    url.searchParams.set('createdBeforeOrAt', createdBeforeOrAt);
-
-    const res = await fetch(url.toString(), { signal });
-    if (!res.ok) throw new Error(`Indexer ${res.status} for sub ${subaccountNumber}`);
-
-    const body: IndexerFillsResponse = await res.json();
-    if (!body.fills || body.fills.length === 0) break;
-
-    for (const fill of body.fills) {
-      if (!seen.has(fill.id) && fill.createdAt >= fromTs) {
-        seen.add(fill.id);
-        fills.push(fill);
-      }
-    }
-
-    const oldest = body.fills[body.fills.length - 1];
-    if (oldest.createdAt < fromTs) break;
-    if (body.fills.length < PAGE_LIMIT) break;
-    if (page === MAX_PAGES - 1) { isCapped = true; break; }
-
-    createdBeforeOrAt = oldest.createdAt;
-  }
-
-  return { fills, isCapped };
 }
 
 export const GET: RequestHandler = async ({ url }) => {
@@ -74,18 +34,71 @@ export const GET: RequestHandler = async ({ url }) => {
   const subaccounts = mm.subaccounts ?? [];
   if (subaccounts.length === 0) throw error(400, `No subaccounts for ${slug}`);
 
-  const signal = AbortSignal.timeout(60_000);
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream({
+    async start(controller) {
+      const send = (obj: unknown) => {
+        controller.enqueue(encoder.encode(JSON.stringify(obj) + '\n'));
+      };
 
-  try {
-    const results = await Promise.all(
-      subaccounts.map((subNum) => fetchSubaccountFills(mm.address, subNum, from, to, signal))
-    );
+      try {
+        const signal = AbortSignal.timeout(60_000);
+        let isCapped = false;
 
-    const fills: IndexerFill[] = results.flatMap((r) => r.fills);
-    const isCapped = results.some((r) => r.isCapped);
+        await Promise.all(
+          subaccounts.map(async (subNum) => {
+            const seen = new Set<string>();
+            let cursor = `${to}T23:59:59.999Z`;
+            const fromTs = `${from}T00:00:00.000Z`;
 
-    return json({ fills, isCapped, from, to });
-  } catch (e) {
-    return json({ error: String(e) }, { status: 502 });
-  }
+            for (let page = 0; page < MAX_PAGES; page++) {
+              const pageUrl = new URL('https://indexer.dydx.trade/v4/fills');
+              pageUrl.searchParams.set('address', mm.address);
+              pageUrl.searchParams.set('subaccountNumber', String(subNum));
+              pageUrl.searchParams.set('limit', String(PAGE_LIMIT));
+              pageUrl.searchParams.set('createdBeforeOrAt', cursor);
+
+              const res = await fetch(pageUrl.toString(), { signal });
+              if (!res.ok) throw new Error(`Indexer ${res.status} for sub ${subNum}`);
+
+              const body: IndexerFillsResponse = await res.json();
+              if (!body.fills || body.fills.length === 0) break;
+
+              const pageFills: IndexerFill[] = [];
+              for (const fill of body.fills) {
+                if (!seen.has(fill.id) && fill.createdAt >= fromTs) {
+                  seen.add(fill.id);
+                  pageFills.push(fill);
+                }
+              }
+
+              if (pageFills.length > 0) {
+                send({ t: 'p', sub: subNum, page: page + 1, fills: pageFills });
+              }
+
+              const oldest = body.fills[body.fills.length - 1];
+              if (oldest.createdAt < fromTs) break;
+              if (body.fills.length < PAGE_LIMIT) break;
+              if (page === MAX_PAGES - 1) { isCapped = true; break; }
+
+              cursor = oldest.createdAt;
+            }
+          })
+        );
+
+        send({ t: 'd', isCapped, from, to });
+      } catch (e) {
+        send({ t: 'e', error: String(e) });
+      }
+
+      controller.close();
+    }
+  });
+
+  return new Response(stream, {
+    headers: {
+      'Content-Type': 'application/x-ndjson',
+      'Cache-Control': 'no-cache'
+    }
+  });
 };

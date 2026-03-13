@@ -1,0 +1,4 @@
+[
+  { "slug": "mm1", "name": "MM1 S1", "address": "dydx1javmgpng0a2dpdpmnqpt0qxw67laaay26yymnp", "subaccounts": [1, 2] },
+  { "slug": "mm3", "name": "MM3", "address": "dydx10hpl83hamwz0pxvjlanh5rcas3mdgf8xk7g7ra", "subaccounts": [0] }
+]

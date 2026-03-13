@@ -1,11 +1,10 @@
 <script lang="ts">
-  import { onDestroy } from 'svelte';
   import { useSWR } from 'sswr';
   import { page } from '$app/stores';
   import { updateParams } from '$lib/utils/params';
   import { presetToFromTo } from '$lib/utils/dates';
   import type { Preset } from '$lib/utils/dates';
-  import { getFillsCache, setFillsCache, hasFreshFillsCache } from './db';
+  import { getFillsCache, setFillsCache, hasFreshFillsCache, findSupersetCache } from './db';
   import { aggregateFills } from './aggregator';
   import ErrorBanner from '$lib/shared/components/ErrorBanner.svelte';
   import EmptyState from '$lib/shared/components/EmptyState.svelte';
@@ -14,14 +13,6 @@
   import FillsChart from './FillsChart.svelte';
   import type { FillsApiResponse, FillTickerRow, IndexerFill } from './types';
   import type { UptimeTicker } from '$lib/shared/sla/types';
-
-  interface RawFillsResponse {
-    fills: IndexerFill[];
-    isCapped: boolean;
-    from: string;
-    to: string;
-    error?: string;
-  }
 
   const { slug, from, to }: { slug: string; from: string; to: string } = $props();
 
@@ -49,9 +40,12 @@
     return fillsFrom === range.from && fillsTo === range.to;
   }
 
-  // ── Cache-aware SWR fetcher ──────────────────────────────────────────────────
+  // ── Cache-aware SWR fetcher with NDJSON streaming ───────────────────────────
   // Key uses `/api/fills?` so it matches the fills-raw endpoint with a simple replace.
   const fillsKey = $derived(`/api/fills?slug=${slug}&from=${fillsFrom}&to=${fillsTo}`);
+
+  // Real-time streaming progress (updated as pages arrive from the indexer)
+  let fetchProgress = $state({ phase: 'idle' as 'idle' | 'streaming' | 'done', pages: 0, fills: 0 });
 
   async function fillsFetcher(key: string): Promise<FillsApiResponse> {
     // 1. Try IndexedDB cache first
@@ -60,18 +54,82 @@
       return aggregateFills(cached.fills, cached.from, cached.to, cached.isCapped);
     }
 
-    // 2. Fetch raw fills from the server proxy
+    // 2. Try superset cache (e.g., 14d cached → 7d requested is a subset)
+    const keyParams = new URLSearchParams(key.split('?')[1]);
+    const reqSlug = keyParams.get('slug')!;
+    const reqFrom = keyParams.get('from')!;
+    const reqTo = keyParams.get('to')!;
+
+    const superset = await findSupersetCache(reqSlug, reqFrom, reqTo);
+    if (superset) {
+      const fromTs = `${reqFrom}T00:00:00.000Z`;
+      const toTs = `${reqTo}T23:59:59.999Z`;
+      const filtered = superset.fills.filter(f => f.createdAt >= fromTs && f.createdAt <= toTs);
+      // Cache the subset for future exact hits
+      await setFillsCache(key, { fills: filtered, isCapped: superset.isCapped, from: reqFrom, to: reqTo });
+      return aggregateFills(filtered, reqFrom, reqTo, superset.isCapped);
+    }
+
+    // 3. Stream raw fills from the server (NDJSON: one JSON object per line)
+    fetchProgress = { phase: 'streaming', pages: 0, fills: 0 };
+
     const rawUrl = key.replace('/api/fills?', '/api/fills-raw?');
     const res = await fetch(rawUrl);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const raw = await res.json() as RawFillsResponse;
-    if (raw.error) throw new Error(raw.error);
+
+    const fills: IndexerFill[] = [];
+    let isCapped = false;
+    let streamFrom = '';
+    let streamTo = '';
+
+    const reader = res.body!.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+
+      let nl: number;
+      while ((nl = buffer.indexOf('\n')) !== -1) {
+        const line = buffer.slice(0, nl);
+        buffer = buffer.slice(nl + 1);
+        if (!line) continue;
+
+        const msg = JSON.parse(line);
+        if (msg.t === 'p') {
+          fills.push(...msg.fills);
+          // Only update progress if this fetch is still for the current key
+          if (key === fillsKey) {
+            fetchProgress = { phase: 'streaming', pages: fetchProgress.pages + 1, fills: fills.length };
+          }
+        } else if (msg.t === 'd') {
+          isCapped = msg.isCapped;
+          streamFrom = msg.from;
+          streamTo = msg.to;
+        } else if (msg.t === 'e') {
+          throw new Error(msg.error);
+        }
+      }
+    }
+
+    // Handle remaining buffer (e.g. final line without trailing newline)
+    if (buffer.trim()) {
+      const msg = JSON.parse(buffer);
+      if (msg.t === 'd') { isCapped = msg.isCapped; streamFrom = msg.from; streamTo = msg.to; }
+      else if (msg.t === 'e') throw new Error(msg.error);
+    }
+
+    if (key === fillsKey) {
+      fetchProgress = { phase: 'done', pages: fetchProgress.pages, fills: fills.length };
+    }
 
     // 3. Persist raw fills to IndexedDB
-    await setFillsCache(key, { fills: raw.fills, isCapped: raw.isCapped, from: raw.from, to: raw.to });
+    await setFillsCache(key, { fills, isCapped, from: streamFrom, to: streamTo });
 
     // 4. Aggregate client-side and return
-    return aggregateFills(raw.fills, raw.from, raw.to, raw.isCapped);
+    return aggregateFills(fills, streamFrom, streamTo, isCapped);
   }
 
   const { data, error, isLoading } = useSWR<FillsApiResponse>(
@@ -86,47 +144,16 @@
   $effect(() => {
     const key = fillsKey; // capture for async closure
     cacheHint = 'checking';
-    hasFreshFillsCache(key).then((hit) => {
-      if (fillsKey === key) cacheHint = hit ? 'cached' : 'fetching';
+    fetchProgress = { phase: 'idle', pages: 0, fills: 0 };
+    hasFreshFillsCache(key).then(async (exactHit) => {
+      if (fillsKey !== key) return;
+      if (exactHit) { cacheHint = 'cached'; return; }
+      // Check if a wider cached range covers this request (e.g., 14d → 7d)
+      const supersetHit = await findSupersetCache(slug, fillsFrom, fillsTo);
+      if (fillsKey !== key) return;
+      cacheHint = supersetHit ? 'cached' : 'fetching';
     });
   });
-
-  // Estimated fetch time from server (based on range size; parallel subaccounts)
-  const estimatedSeconds = $derived.by(() => {
-    const diffDays =
-      (new Date(fillsTo).getTime() - new Date(fillsFrom).getTime()) / (1000 * 60 * 60 * 24);
-    if (diffDays <= 1) return 3;
-    if (diffDays <= 7) return 7;
-    return 8; // 14d / 30d hit the 20-page cap, roughly same time
-  });
-
-  // ── Animated progress bar ────────────────────────────────────────────────────
-  let progressPct = $state(0);
-  let _progressTimer: ReturnType<typeof setInterval> | null = null;
-
-  function clearProgressTimer() {
-    if (_progressTimer) { clearInterval(_progressTimer); _progressTimer = null; }
-  }
-
-  $effect(() => {
-    const isFetching = cacheHint === 'fetching' && $isLoading;
-    if (isFetching) {
-      progressPct = 0;
-      clearProgressTimer();
-      const estMs = estimatedSeconds * 1000;
-      const tickMs = 120;
-      const step = (88 / estMs) * tickMs; // animate to 88%, jump to 100% on done
-      _progressTimer = setInterval(() => {
-        progressPct = Math.min(progressPct + step, 88);
-      }, tickMs);
-    } else {
-      clearProgressTimer();
-      if ($data || $error) progressPct = 100;
-    }
-    return clearProgressTimer;
-  });
-
-  onDestroy(clearProgressTimer);
 
   // ── Fresh-data guards ────────────────────────────────────────────────────────
   const dataIsFresh = $derived(
@@ -412,30 +439,29 @@
 {#if $error && !dataIsFresh}
   <ErrorBanner message="Failed to load fills data" />
 {:else if showSkeleton}
-  <!-- Progress loader -->
+  <!-- Streaming progress -->
   <div class="mb-4 rounded border border-zinc-800 bg-zinc-900/60 px-4 py-3">
     <div class="mb-2 flex items-center justify-between text-xs">
       {#if cacheHint === 'cached'}
         <span class="text-violet-300">Loading from cache…</span>
         <span class="text-zinc-600">instant</span>
-      {:else if cacheHint === 'fetching'}
+      {:else if fetchProgress.phase === 'streaming'}
         <span class="text-zinc-300">Fetching from indexer</span>
-        <span class="mono text-zinc-500">~{estimatedSeconds}s</span>
+        <span class="mono text-zinc-400">{fetchProgress.fills.toLocaleString()} fills · page {fetchProgress.pages}</span>
       {:else}
-        <span class="text-zinc-500">Checking cache…</span>
+        <span class="text-zinc-500">Connecting to indexer…</span>
         <span class="mono text-zinc-600">{fillsFrom} → {fillsTo}</span>
       {/if}
     </div>
     <div class="h-1 w-full overflow-hidden rounded-full bg-zinc-800">
       <div
-        class="h-full rounded-full bg-violet-500 transition-all"
-        style="width: {cacheHint === 'cached' ? 100 : progressPct}%;
-               transition-duration: {cacheHint === 'cached' ? '150ms' : '120ms'}"
+        class="h-full rounded-full bg-violet-500 transition-all duration-300"
+        style="width: {cacheHint === 'cached' ? 100 : fetchProgress.phase === 'streaming' ? Math.max(5, Math.min(95, fetchProgress.pages * 6)) : 2}%"
       ></div>
     </div>
-    {#if cacheHint === 'fetching'}
+    {#if fetchProgress.phase === 'streaming'}
       <p class="mt-1.5 text-[10px] text-zinc-600">
-        Paginating dYdX indexer in parallel across subaccounts · first load only
+        Streaming from dYdX indexer in parallel across subaccounts
       </p>
     {/if}
   </div>

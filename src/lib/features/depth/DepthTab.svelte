@@ -248,11 +248,6 @@
     const totalSeconds = Math.max(1, Math.floor(progressElapsedMs / 1000));
     return `${totalSeconds}s elapsed`;
   });
-  const progressPercent = $derived.by(() => {
-    if (!loadingWithFeedback) return 0;
-    const ratio = progressElapsedMs / progressEstimateMs;
-    return Math.max(8, Math.min(92, Math.round(ratio * 100)));
-  });
   const progressLabel = $derived(
     pendingReason ?? (depthView === 'all' ? 'Loading bid/ask...' : 'Refreshing depth data...')
   );
@@ -541,7 +536,8 @@
       <ProgressLoader
         label={progressLabel}
         detail={progressDetail}
-        percent={progressPercent}
+        estimatedMs={progressEstimateMs}
+        elapsedMs={progressElapsedMs}
         elapsed={progressElapsedLabel}
       />
     {/if}
@@ -694,7 +690,8 @@
               compact={true}
               label={progressLabel}
               detail={progressDetail}
-              percent={progressPercent}
+              estimatedMs={progressEstimateMs}
+              elapsedMs={progressElapsedMs}
               elapsed={progressElapsedLabel}
             />
           {:else}

@@ -57,18 +57,6 @@
     <TimeRangeSelector from={data.from} to={data.to} />
   </div>
 
-  {#if browser}
-    <TabPrefetcher
-      slug={data.mm.slug}
-      from={data.from}
-      to={data.to}
-      bpsLeeway={data.bpsLeeway}
-      {bps}
-      {usd}
-      {activeTab}
-    />
-  {/if}
-
   <div class="rounded-lg border border-zinc-800 bg-zinc-900 p-4">
     {#if !browser}
       <LoadingSpinner />
@@ -91,4 +79,16 @@
       <DepthTab slug={data.mm.slug} from={data.from} to={data.to} {usd} />
     {/if}
   </div>
+
+  {#if browser}
+    <TabPrefetcher
+      slug={data.mm.slug}
+      from={data.from}
+      to={data.to}
+      bpsLeeway={data.bpsLeeway}
+      {bps}
+      {usd}
+      {activeTab}
+    />
+  {/if}
 </PageShell>
