@@ -1,0 +1,67 @@
+@import 'tailwindcss';
+
+@theme {
+  --color-zinc-950: #09090b;
+  --color-zinc-900: #1b1b1f;
+  --color-zinc-800: #2c2c32;
+  --color-zinc-700: #3f3f46;
+  --color-zinc-600: #52525b;
+  --color-zinc-500: #71717a;
+  --color-zinc-400: #a1a1aa;
+  --color-zinc-300: #d4d4d8;
+  --color-zinc-200: #e4e4e7;
+  --color-zinc-100: #f4f4f5;
+  --color-violet-500: #8b5cf6;
+  --color-violet-400: #a78bfa;
+  --color-emerald-400: #34d399;
+  --color-amber-400: #fbbf24;
+  --color-red-400: #f87171;
+  --color-sky-400: #38bdf8;
+}
+
+:root {
+  color-scheme: dark;
+}
+
+body {
+  background-color: var(--color-zinc-950);
+  color: var(--color-zinc-100);
+  font-family: 'IBM Plex Sans', ui-sans-serif, system-ui, sans-serif;
+}
+
+.mono {
+  font-family: 'IBM Plex Mono', 'Cascadia Code', ui-monospace, monospace;
+}
+
+@keyframes loading-slide {
+  0% {
+    transform: translateX(-120%);
+  }
+  100% {
+    transform: translateX(220%);
+  }
+}
+
+@keyframes skeleton-shimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+.loading-bar {
+  animation: loading-slide 1s ease-in-out infinite;
+}
+
+.skeleton {
+  background-image: linear-gradient(
+    90deg,
+    rgba(63, 63, 70, 0.5) 0%,
+    rgba(113, 113, 122, 0.35) 50%,
+    rgba(63, 63, 70, 0.5) 100%
+  );
+  background-size: 220% 100%;
+  animation: skeleton-shimmer 1.3s linear infinite;
+}
