@@ -60,6 +60,13 @@
   <div class="rounded-lg border border-zinc-800 bg-zinc-900 p-4">
     {#if !browser}
       <LoadingSpinner />
+    {:else if !isSupportedRange}
+      <div class="rounded border border-amber-400/30 bg-amber-400/10 px-4 py-4 text-sm text-amber-300">
+        <div class="font-medium text-amber-200">Coming soon</div>
+        <p class="mt-1">
+          Only the current 24h range is enabled for MM Performance right now. 7d, 30d, and custom date selection are temporarily disabled.
+        </p>
+      </div>
     {:else if activeTab === 'fills'}
       <FillsTab
         slug={data.mm.slug}
@@ -68,13 +75,6 @@
         from={data.from}
         to={data.to}
       />
-    {:else if !isSupportedRange}
-      <div class="rounded border border-amber-400/30 bg-amber-400/10 px-4 py-4 text-sm text-amber-300">
-        <div class="font-medium text-amber-200">Coming soon</div>
-        <p class="mt-1">
-          Only the current 24h range is enabled for MM Performance right now. 7d, 30d, and custom date selection are temporarily disabled.
-        </p>
-      </div>
     {:else if activeTab === 'summary'}
       <SummaryTab slug={data.mm.slug} from={data.from} to={data.to} />
     {:else if activeTab === 'uptime'}

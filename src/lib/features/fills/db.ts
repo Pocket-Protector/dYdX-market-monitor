@@ -23,7 +23,8 @@ export interface CachedFillsEntry {
 
 const DB_NAME = 'dydx-mm-fills';
 const STORE = 'fills_raw';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
+const DATE_ONLY_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 // Singleton DB promise — opened once, reused across calls
 let _db: Promise<IDBDatabase> | null = null;
@@ -34,9 +35,8 @@ function openDb(): Promise<IDBDatabase> {
     const req = indexedDB.open(DB_NAME, DB_VERSION);
     req.onupgradeneeded = (e) => {
       const db = (e.target as IDBOpenDBRequest).result;
-      if (!db.objectStoreNames.contains(STORE)) {
-        db.createObjectStore(STORE);
-      }
+      if (db.objectStoreNames.contains(STORE)) db.deleteObjectStore(STORE);
+      db.createObjectStore(STORE);
     };
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => {
@@ -58,15 +58,49 @@ function isFresh(entry: CachedFillsEntry): boolean {
   return Date.now() - entry.cachedAt < ttlMs(entry.to);
 }
 
+function isDateOnly(value: unknown): value is string {
+  return typeof value === 'string' && DATE_ONLY_RE.test(value);
+}
+
+function isValidCachedEntry(value: unknown): value is CachedFillsEntry {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+
+  const entry = value as Partial<CachedFillsEntry>;
+  return (
+    Array.isArray(entry.fills) &&
+    typeof entry.isCapped === 'boolean' &&
+    typeof entry.cachedAt === 'number' &&
+    Number.isFinite(entry.cachedAt) &&
+    isDateOnly(entry.from) &&
+    isDateOnly(entry.to)
+  );
+}
+
+function getKeyRange(key: string): { from: string; to: string } | null {
+  const query = key.split('?')[1];
+  if (!query) return null;
+
+  const params = new URLSearchParams(query);
+  const from = params.get('from');
+  const to = params.get('to');
+
+  if (!isDateOnly(from) || !isDateOnly(to)) return null;
+  return { from, to };
+}
+
 export async function getFillsCache(key: string): Promise<CachedFillsEntry | null> {
   try {
     const db = await openDb();
-    const entry = await new Promise<CachedFillsEntry | undefined>((resolve, reject) => {
+    const entry = await new Promise<unknown>((resolve, reject) => {
       const req = db.transaction(STORE, 'readonly').objectStore(STORE).get(key);
-      req.onsuccess = () => resolve(req.result as CachedFillsEntry | undefined);
+      req.onsuccess = () => resolve(req.result);
       req.onerror = () => reject(req.error);
     });
-    if (!entry || !isFresh(entry)) return null;
+
+    const expectedRange = getKeyRange(key);
+    if (!expectedRange || !isValidCachedEntry(entry) || !isFresh(entry)) return null;
+    if (entry.from !== expectedRange.from || entry.to !== expectedRange.to) return null;
+
     return entry;
   } catch {
     return null;
@@ -78,6 +112,8 @@ export async function setFillsCache(
   data: Omit<CachedFillsEntry, 'cachedAt'>
 ): Promise<void> {
   try {
+    if (!Array.isArray(data.fills) || !isDateOnly(data.from) || !isDateOnly(data.to)) return;
+
     const db = await openDb();
     await new Promise<void>((resolve) => {
       const tx = db.transaction(STORE, 'readwrite');
@@ -93,50 +129,6 @@ export async function setFillsCache(
 /** Quick existence check without deserializing the fills array. */
 export async function hasFreshFillsCache(key: string): Promise<boolean> {
   return (await getFillsCache(key)) !== null;
-}
-
-/**
- * Find a cached entry whose date range is a superset of the requested range.
- * e.g. if 14d is cached and 7d is requested, the 14d entry covers it.
- * Returns the smallest fresh superset, or null.
- */
-export async function findSupersetCache(
-  slug: string,
-  requestedFrom: string,
-  requestedTo: string
-): Promise<CachedFillsEntry | null> {
-  try {
-    const db = await openDb();
-    return new Promise<CachedFillsEntry | null>((resolve, reject) => {
-      const tx = db.transaction(STORE, 'readonly');
-      const req = tx.objectStore(STORE).openCursor();
-      let best: CachedFillsEntry | null = null;
-
-      req.onsuccess = () => {
-        const cursor = req.result;
-        if (!cursor) { resolve(best); return; }
-
-        const key = cursor.key as string;
-        const entry = cursor.value as CachedFillsEntry;
-
-        if (
-          key.includes(`slug=${slug}&`) &&
-          isFresh(entry) &&
-          entry.from <= requestedFrom &&
-          entry.to >= requestedTo
-        ) {
-          // Prefer the smallest covering range
-          if (!best || entry.from > best.from || entry.to < best.to) {
-            best = entry;
-          }
-        }
-        cursor.continue();
-      };
-      req.onerror = () => reject(req.error);
-    });
-  } catch {
-    return null;
-  }
 }
 
 /** Wipe the entire fills cache (useful when aggregation logic changes). */

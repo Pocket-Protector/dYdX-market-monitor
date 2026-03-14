@@ -2,9 +2,7 @@
   import { useSWR } from 'sswr';
   import { page } from '$app/stores';
   import { updateParams } from '$lib/utils/params';
-  import { presetToFromTo } from '$lib/utils/dates';
-  import type { Preset } from '$lib/utils/dates';
-  import { getFillsCache, setFillsCache, hasFreshFillsCache, findSupersetCache } from './db';
+  import { getFillsCache, setFillsCache, hasFreshFillsCache } from './db';
   import { aggregateFills } from './aggregator';
   import ErrorBanner from '$lib/shared/components/ErrorBanner.svelte';
   import EmptyState from '$lib/shared/components/EmptyState.svelte';
@@ -25,33 +23,10 @@
     to: string;
   } = $props();
 
-  // ── Fills-specific time range (independent from global range) ───────────────
-  const PRESETS: Preset[] = ['24h', '7d', '14d', '30d'];
+  // Keep fills aligned with the page-wide calendar-day range.
 
-  const fillsFrom = $derived($page.url.searchParams.get('fillsFrom') ?? presetToFromTo('24h').from);
-  const fillsTo = $derived($page.url.searchParams.get('fillsTo') ?? presetToFromTo('24h').to);
-
-  function applyPreset(preset: Preset) {
-    const range = presetToFromTo(preset);
-    updateParams({ fillsFrom: range.from, fillsTo: range.to });
-  }
-
-  function applyCustomFrom(e: Event) {
-    updateParams({ fillsFrom: (e.target as HTMLInputElement).value });
-  }
-
-  function applyCustomTo(e: Event) {
-    updateParams({ fillsTo: (e.target as HTMLInputElement).value });
-  }
-
-  function isPresetActive(preset: Preset): boolean {
-    const range = presetToFromTo(preset);
-    return fillsFrom === range.from && fillsTo === range.to;
-  }
-
-  // ── Cache-aware SWR fetcher with NDJSON streaming ───────────────────────────
-  // Key uses `/api/fills?` so it matches the fills-raw endpoint with a simple replace.
-  const fillsKey = $derived(`/api/fills?slug=${slug}&from=${fillsFrom}&to=${fillsTo}`);
+  // Cache-aware SWR fetcher for the current page range.
+  const fillsKey = $derived(`/api/fills?slug=${slug}&from=${from}&to=${to}`);
 
   // Real-time streaming progress (updated as pages arrive from the indexer)
   let fetchProgress = $state({ phase: 'idle' as 'idle' | 'streaming' | 'done', pages: 0, fills: 0 });
@@ -140,23 +115,7 @@
       return aggregateFills(cached.fills, cached.from, cached.to, cached.isCapped);
     }
 
-    // 2. Try superset cache (e.g., 14d cached → 7d requested is a subset)
-    const keyParams = new URLSearchParams(key.split('?')[1]);
-    const reqSlug = keyParams.get('slug')!;
-    const reqFrom = keyParams.get('from')!;
-    const reqTo = keyParams.get('to')!;
-
-    const superset = await findSupersetCache(reqSlug, reqFrom, reqTo);
-    if (superset) {
-      const fromTs = `${reqFrom}T00:00:00.000Z`;
-      const toTs = `${reqTo}T23:59:59.999Z`;
-      const filtered = superset.fills.filter(f => f.createdAt >= fromTs && f.createdAt <= toTs);
-      // Cache the subset for future exact hits
-      await setFillsCache(key, { fills: filtered, isCapped: superset.isCapped, from: reqFrom, to: reqTo });
-      return aggregateFills(filtered, reqFrom, reqTo, superset.isCapped);
-    }
-
-    // 3. Stream raw fills from the server (NDJSON: one JSON object per line)
+    // 2. Fetch directly from the dYdX indexer.
     fetchProgress = { phase: 'streaming', pages: 0, fills: 0 };
     try {
       return await fetchDirectFills(key);
@@ -182,19 +141,15 @@
     const key = fillsKey; // capture for async closure
     cacheHint = 'checking';
     fetchProgress = { phase: 'idle', pages: 0, fills: 0 };
-    hasFreshFillsCache(key).then(async (exactHit) => {
+    hasFreshFillsCache(key).then((exactHit) => {
       if (fillsKey !== key) return;
-      if (exactHit) { cacheHint = 'cached'; return; }
-      // Check if a wider cached range covers this request (e.g., 14d → 7d)
-      const supersetHit = await findSupersetCache(slug, fillsFrom, fillsTo);
-      if (fillsKey !== key) return;
-      cacheHint = supersetHit ? 'cached' : 'fetching';
+      cacheHint = exactHit ? 'cached' : 'fetching';
     });
   });
 
   // ── Fresh-data guards ────────────────────────────────────────────────────────
   const dataIsFresh = $derived(
-    Boolean($data && $data.from === fillsFrom && $data.to === fillsTo)
+    Boolean($data && $data.from === from && $data.to === to)
   );
   const showSkeleton = $derived(!dataIsFresh && !$error);
   const showRefreshOverlay = $derived(dataIsFresh && $isLoading);
@@ -353,39 +308,13 @@
 
 <!-- ── Controls ──────────────────────────────────────────────────────────── -->
 <div class="mb-4 space-y-3">
-  <!-- Range presets -->
-  <div class="flex flex-wrap items-center gap-3">
-    <div class="flex items-center gap-1">
-      <span class="text-xs text-zinc-500">Range:</span>
-      {#each PRESETS as preset}
-        <button
-          onclick={() => applyPreset(preset)}
-          class="rounded px-2.5 py-1 text-xs font-medium transition-colors {isPresetActive(preset)
-            ? 'bg-violet-500/20 text-violet-400'
-            : 'text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800'}"
-        >
-          {preset}
-        </button>
-      {/each}
-    </div>
-    <div class="flex items-center gap-1.5 text-xs text-zinc-400">
-      <input
-        type="date"
-        value={fillsFrom}
-        onchange={applyCustomFrom}
-        class="rounded border border-zinc-700 bg-zinc-900 px-2 py-1 text-xs text-zinc-200 focus:border-violet-500 focus:outline-none mono"
-      />
-      <span class="text-zinc-600">→</span>
-      <input
-        type="date"
-        value={fillsTo}
-        onchange={applyCustomTo}
-        class="rounded border border-zinc-700 bg-zinc-900 px-2 py-1 text-xs text-zinc-200 focus:border-violet-500 focus:outline-none mono"
-      />
-    </div>
+  <div class="flex flex-wrap items-center gap-3 text-xs">
+    <span class="text-zinc-500">Page range</span>
+    <span class="rounded border border-zinc-800 bg-zinc-900/60 px-2 py-1 mono text-zinc-300">
+      {from} to {to}
+    </span>
+    <span class="text-zinc-600">Uses the global selector above.</span>
   </div>
-
-  <!-- Filters row -->
   <div class="flex flex-wrap items-center gap-3">
     <label class="flex items-center gap-2 text-xs text-zinc-400">
       Ticker
@@ -436,7 +365,7 @@
       <span class="text-violet-400 animate-pulse">· refreshing…</span>
     {/if}
   {:else if showSkeleton}
-    <span class="mono text-zinc-500">{fillsFrom} → {fillsTo}</span>
+    <span class="mono text-zinc-500">{from} to {to}</span>
   {/if}
 </div>
 
@@ -487,7 +416,7 @@
         <span class="mono text-zinc-400">{fetchProgress.fills.toLocaleString()} fills · page {fetchProgress.pages}</span>
       {:else}
         <span class="text-zinc-500">Connecting to indexer…</span>
-        <span class="mono text-zinc-600">{fillsFrom} → {fillsTo}</span>
+        <span class="mono text-zinc-600">{from} to {to}</span>
       {/if}
     </div>
     <div class="h-1 w-full overflow-hidden rounded-full bg-zinc-800">

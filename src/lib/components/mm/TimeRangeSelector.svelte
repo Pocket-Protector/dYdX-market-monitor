@@ -4,7 +4,7 @@
 
   const { from, to }: { from: string; to: string } = $props();
 
-  const tooltip = 'Coming soon';
+  const comingSoonTooltip = 'Coming soon. Only the current 24h range is enabled right now.';
 
   const presets: { label: string; value: Preset; enabled: boolean }[] = [
     { label: '24h', value: '24h', enabled: true },
@@ -22,6 +22,14 @@
     const range = presetToFromTo(preset);
     return range.from === from && range.to === to;
   }
+
+  function getPresetTooltip(preset: { value: Preset; enabled: boolean }): string | undefined {
+    if (!preset.enabled) return comingSoonTooltip;
+    if (preset.value !== '24h') return undefined;
+
+    const range = presetToFromTo('24h');
+    return `24h uses the calendar-date span ${range.from} to ${range.to}, not a rolling last 24 hours.`;
+  }
 </script>
 
 <div class="flex items-center gap-2">
@@ -29,7 +37,7 @@
 
   {#each presets as preset}
     <button
-      title={!preset.enabled ? tooltip : undefined}
+      title={getPresetTooltip(preset)}
       aria-disabled={!preset.enabled}
       onclick={() => applyPreset(preset.value, preset.enabled)}
       class="rounded px-2 py-1 text-xs font-medium transition-colors {preset.enabled
@@ -42,7 +50,7 @@
     </button>
   {/each}
 
-  <div class="ml-2 flex items-center gap-1" title={tooltip}>
+  <div class="ml-2 flex items-center gap-1" title="Custom date selection coming soon.">
     <input
       type="date"
       value={from}
