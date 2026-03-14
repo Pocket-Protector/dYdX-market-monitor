@@ -14,7 +14,16 @@
   import type { FillsApiResponse, FillTickerRow, IndexerFill } from './types';
   import type { UptimeTicker } from '$lib/shared/sla/types';
 
-  const { slug, from, to }: { slug: string; from: string; to: string } = $props();
+  const PAGE_LIMIT = 500;
+  const MAX_PAGES = 20;
+
+  const { slug, address, subaccounts, from, to }: {
+    slug: string;
+    address: string;
+    subaccounts: number[];
+    from: string;
+    to: string;
+  } = $props();
 
   // ── Fills-specific time range (independent from global range) ───────────────
   const PRESETS: Preset[] = ['24h', '7d', '14d', '30d'];
@@ -47,6 +56,83 @@
   // Real-time streaming progress (updated as pages arrive from the indexer)
   let fetchProgress = $state({ phase: 'idle' as 'idle' | 'streaming' | 'done', pages: 0, fills: 0 });
 
+  async function fetchAggregatedFills(key: string): Promise<FillsApiResponse> {
+    const res = await fetch(key);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return (await res.json()) as FillsApiResponse;
+  }
+
+  async function fetchDirectFills(key: string): Promise<FillsApiResponse> {
+    const keyParams = new URLSearchParams(key.split('?')[1]);
+    const reqFrom = keyParams.get('from')!;
+    const reqTo = keyParams.get('to')!;
+    const fromTs = `${reqFrom}T00:00:00.000Z`;
+
+    let pages = 0;
+    let fillCount = 0;
+
+    const results = await Promise.all(
+      subaccounts.map(async (subaccountNumber) => {
+        const seen = new Set<string>();
+        const fills: IndexerFill[] = [];
+        let isCapped = false;
+        let createdBeforeOrAt = `${reqTo}T23:59:59.999Z`;
+
+        for (let page = 0; page < MAX_PAGES; page++) {
+          const pageUrl = new URL('https://indexer.dydx.trade/v4/fills');
+          pageUrl.searchParams.set('address', address);
+          pageUrl.searchParams.set('subaccountNumber', String(subaccountNumber));
+          pageUrl.searchParams.set('limit', String(PAGE_LIMIT));
+          pageUrl.searchParams.set('createdBeforeOrAt', createdBeforeOrAt);
+
+          const res = await fetch(pageUrl.toString());
+          if (!res.ok) throw new Error(`Indexer ${res.status} for sub ${subaccountNumber}`);
+
+          const body = (await res.json()) as { fills?: IndexerFill[] };
+          const pageFills = body.fills ?? [];
+          if (pageFills.length === 0) break;
+
+          let addedThisPage = 0;
+          for (const fill of pageFills) {
+            if (!seen.has(fill.id) && fill.createdAt >= fromTs) {
+              seen.add(fill.id);
+              fills.push(fill);
+              addedThisPage += 1;
+            }
+          }
+
+          if (addedThisPage > 0 && key === fillsKey) {
+            pages += 1;
+            fillCount += addedThisPage;
+            fetchProgress = { phase: 'streaming', pages, fills: fillCount };
+          }
+
+          const oldest = pageFills[pageFills.length - 1];
+          if (oldest.createdAt < fromTs) break;
+          if (pageFills.length < PAGE_LIMIT) break;
+          if (page === MAX_PAGES - 1) {
+            isCapped = true;
+            break;
+          }
+
+          createdBeforeOrAt = oldest.createdAt;
+        }
+
+        return { fills, isCapped };
+      })
+    );
+
+    const allFills = results.flatMap((result) => result.fills);
+    const isCapped = results.some((result) => result.isCapped);
+
+    if (key === fillsKey) {
+      fetchProgress = { phase: 'done', pages, fills: allFills.length };
+    }
+
+    await setFillsCache(key, { fills: allFills, isCapped, from: reqFrom, to: reqTo });
+    return aggregateFills(allFills, reqFrom, reqTo, isCapped);
+  }
+
   async function fillsFetcher(key: string): Promise<FillsApiResponse> {
     // 1. Try IndexedDB cache first
     const cached = await getFillsCache(key);
@@ -72,64 +158,15 @@
 
     // 3. Stream raw fills from the server (NDJSON: one JSON object per line)
     fetchProgress = { phase: 'streaming', pages: 0, fills: 0 };
-
-    const rawUrl = key.replace('/api/fills?', '/api/fills-raw?');
-    const res = await fetch(rawUrl);
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-
-    const fills: IndexerFill[] = [];
-    let isCapped = false;
-    let streamFrom = '';
-    let streamTo = '';
-
-    const reader = res.body!.getReader();
-    const decoder = new TextDecoder();
-    let buffer = '';
-
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-
-      let nl: number;
-      while ((nl = buffer.indexOf('\n')) !== -1) {
-        const line = buffer.slice(0, nl);
-        buffer = buffer.slice(nl + 1);
-        if (!line) continue;
-
-        const msg = JSON.parse(line);
-        if (msg.t === 'p') {
-          fills.push(...msg.fills);
-          // Only update progress if this fetch is still for the current key
-          if (key === fillsKey) {
-            fetchProgress = { phase: 'streaming', pages: fetchProgress.pages + 1, fills: fills.length };
-          }
-        } else if (msg.t === 'd') {
-          isCapped = msg.isCapped;
-          streamFrom = msg.from;
-          streamTo = msg.to;
-        } else if (msg.t === 'e') {
-          throw new Error(msg.error);
-        }
+    try {
+      return await fetchDirectFills(key);
+    } catch (directError) {
+      if (key === fillsKey) {
+        fetchProgress = { phase: 'idle', pages: 0, fills: 0 };
       }
+      console.warn('fills direct fallback', directError);
+      return fetchAggregatedFills(key);
     }
-
-    // Handle remaining buffer (e.g. final line without trailing newline)
-    if (buffer.trim()) {
-      const msg = JSON.parse(buffer);
-      if (msg.t === 'd') { isCapped = msg.isCapped; streamFrom = msg.from; streamTo = msg.to; }
-      else if (msg.t === 'e') throw new Error(msg.error);
-    }
-
-    if (key === fillsKey) {
-      fetchProgress = { phase: 'done', pages: fetchProgress.pages, fills: fills.length };
-    }
-
-    // 3. Persist raw fills to IndexedDB
-    await setFillsCache(key, { fills, isCapped, from: streamFrom, to: streamTo });
-
-    // 4. Aggregate client-side and return
-    return aggregateFills(fills, streamFrom, streamTo, isCapped);
   }
 
   const { data, error, isLoading } = useSWR<FillsApiResponse>(

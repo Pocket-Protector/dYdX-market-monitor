@@ -14,7 +14,7 @@ export const load: PageServerLoad = async ({ params, url }) => {
   const bpsLeeway = url.searchParams.get('leeway') ?? '0';
 
   return {
-    mm: { slug: mm.slug, name: mm.name, address: mm.address },
+    mm: { slug: mm.slug, name: mm.name, address: mm.address, subaccounts: mm.subaccounts },
     from,
     to,
     bpsLeeway: parseFloat(bpsLeeway)
