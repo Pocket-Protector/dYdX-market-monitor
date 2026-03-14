@@ -308,13 +308,6 @@
 
 <!-- ── Controls ──────────────────────────────────────────────────────────── -->
 <div class="mb-4 space-y-3">
-  <div class="flex flex-wrap items-center gap-3 text-xs">
-    <span class="text-zinc-500">Page range</span>
-    <span class="rounded border border-zinc-800 bg-zinc-900/60 px-2 py-1 mono text-zinc-300">
-      {from} to {to}
-    </span>
-    <span class="text-zinc-600">Uses the global selector above.</span>
-  </div>
   <div class="flex flex-wrap items-center gap-3">
     <label class="flex items-center gap-2 text-xs text-zinc-400">
       Ticker
