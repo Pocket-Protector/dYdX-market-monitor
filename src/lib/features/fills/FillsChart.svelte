@@ -29,6 +29,9 @@
   let canvas: HTMLCanvasElement;
   let chart: Chart | null = null;
 
+  const MAKER_COLOR = '#34d399';
+  const TAKER_COLOR = '#f87171';
+
   function fmtUsd(n: number) {
     if (Math.abs(n) >= 1_000_000) return `$${(n / 1_000_000).toFixed(1)}M`;
     if (Math.abs(n) >= 1_000) return `$${(n / 1_000).toFixed(0)}K`;
@@ -48,8 +51,8 @@
         datasets.push({
           label: breakdown === 'total' ? 'Maker Volume' : 'Maker Volume',
           data: data.map((p) => ({ x: new Date(p.ts).getTime(), y: p.makerVolume })),
-          borderColor: '#38bdf8',
-          backgroundColor: '#38bdf822',
+          borderColor: MAKER_COLOR,
+          backgroundColor: MAKER_COLOR + '22',
           borderWidth: 1.5,
           pointRadius: 0,
           tension: 0.3
@@ -59,8 +62,8 @@
         datasets.push({
           label: breakdown === 'total' ? 'Taker Volume' : 'Taker Volume',
           data: data.map((p) => ({ x: new Date(p.ts).getTime(), y: p.takerVolume })),
-          borderColor: '#f472b6',
-          backgroundColor: '#f472b622',
+          borderColor: TAKER_COLOR,
+          backgroundColor: TAKER_COLOR + '22',
           borderWidth: 1.5,
           pointRadius: 0,
           tension: 0.3

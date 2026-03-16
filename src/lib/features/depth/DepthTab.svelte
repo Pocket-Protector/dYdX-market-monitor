@@ -391,7 +391,7 @@
     const groups = displaySections.map((section) => section.group);
     const next: Record<string, boolean> = {};
     for (const group of groups) {
-      next[group] = collapsedGroups[group] ?? false;
+      next[group] = collapsedGroups[group] ?? true;
     }
 
     const keys = Object.keys(next);
@@ -406,7 +406,7 @@
   }
 
   function isGroupCollapsed(group: string): boolean {
-    return Boolean(collapsedGroups[group]);
+    return collapsedGroups[group] ?? true;
   }
 </script>
 

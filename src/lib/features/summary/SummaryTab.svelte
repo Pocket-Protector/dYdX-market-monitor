@@ -164,7 +164,7 @@
   }
 
   function isGroupCollapsed(group: string): boolean {
-    return Boolean(collapsedGroups[group]);
+    return collapsedGroups[group] ?? true;
   }
 
   const groupedSections = $derived.by((): GroupedSection[] | null => {
@@ -325,83 +325,131 @@
   <EmptyState />
 {:else}
   <div class="relative">
-    <div class="overflow-x-auto">
-      <table class="w-full text-sm">
-        <thead>
-          <!-- Row 1: group labels -->
-          <tr class="text-left text-xs text-zinc-500">
-            <th rowspan="2" class="pb-2 pr-4 font-medium align-bottom">
-              <button type="button" onclick={() => toggleSort('ticker')} class="flex items-center gap-1 hover:text-zinc-300 transition-colors">
-                Ticker{#if sortCol === 'ticker'}<span class="ml-1 text-violet-400">{sortDir === 'asc' ? '↑' : '↓'}</span>{:else}<span class="ml-1 text-zinc-700">↕</span>{/if}
-              </button>
-            </th>
-            <th rowspan="2" class="pb-2 pr-6 font-medium text-right align-bottom border-r border-zinc-800">
-              <button type="button" onclick={() => toggleSort('uptimePct')} class="flex w-full items-center justify-end gap-1 hover:text-zinc-300 transition-colors">
-                {#if sortCol === 'uptimePct'}<span class="text-violet-400">{sortDir === 'asc' ? '↑' : '↓'}</span>{:else}<span class="text-zinc-700">↕</span>{/if}Uptime
-              </button>
-            </th>
-            <th colspan="2" class="pb-1 pr-6 text-center font-semibold tracking-wide text-zinc-400 border-b border-zinc-700/60">Bid</th>
-            <th colspan="2" class="pb-1 text-center font-semibold tracking-wide text-zinc-400 border-b border-zinc-700/60">Ask</th>
-          </tr>
-          <!-- Row 2: sortable sub-headers -->
-          <tr class="border-b border-zinc-800 text-left text-xs text-zinc-500">
-            <th class="pb-2 pr-4 font-medium text-right">
-              <button type="button" onclick={() => toggleSort('medianBidOuterBps')} title="Median of the max bps quoted — the furthest price level at which liquidity is still posted (see Total Liq. for the size at that level)" class="flex w-full items-center justify-end gap-1 hover:text-zinc-300 transition-colors">
-                {#if sortCol === 'medianBidOuterBps'}<span class="text-violet-400">{sortDir === 'asc' ? '↑' : '↓'}</span>{:else}<span class="text-zinc-700">↕</span>{/if}Spread (bps)
-              </button>
-            </th>
-            <th class="pb-2 pr-6 font-medium text-right border-r border-zinc-800">
-              <button type="button" onclick={() => toggleSort('medianBidTotalUsd')} class="flex w-full items-center justify-end gap-1 hover:text-zinc-300 transition-colors">
-                {#if sortCol === 'medianBidTotalUsd'}<span class="text-violet-400">{sortDir === 'asc' ? '↑' : '↓'}</span>{:else}<span class="text-zinc-700">↕</span>{/if}Total Liq.
-              </button>
-            </th>
-            <th class="pb-2 pr-4 font-medium text-right">
-              <button type="button" onclick={() => toggleSort('medianAskOuterBps')} title="Median of the max bps quoted — the furthest price level at which liquidity is still posted (see Total Liq. for the size at that level)" class="flex w-full items-center justify-end gap-1 hover:text-zinc-300 transition-colors">
-                {#if sortCol === 'medianAskOuterBps'}<span class="text-violet-400">{sortDir === 'asc' ? '↑' : '↓'}</span>{:else}<span class="text-zinc-700">↕</span>{/if}Spread (bps)
-              </button>
-            </th>
-            <th class="pb-2 pr-4 font-medium text-right">
-              <button type="button" onclick={() => toggleSort('medianAskTotalUsd')} class="flex w-full items-center justify-end gap-1 hover:text-zinc-300 transition-colors">
-                {#if sortCol === 'medianAskTotalUsd'}<span class="text-violet-400">{sortDir === 'asc' ? '↑' : '↓'}</span>{:else}<span class="text-zinc-700">↕</span>{/if}Total Liq.
-              </button>
-            </th>
-          </tr>
-        </thead>
-        <tbody>
-          {#if groupedSections}
-            {#each groupedSections as section}
-              <tr class="border-b border-zinc-700/60 bg-zinc-800/25">
-                <td class="py-1.5 pl-2 text-xs font-semibold tracking-wide text-zinc-500">
-                  <button
-                    type="button"
-                    onclick={() => toggleGroup(section.group)}
-                    class="flex w-full items-center gap-2 text-left hover:text-zinc-300"
-                  >
-                    <span class="mono inline-block w-3 text-zinc-400">{isGroupCollapsed(section.group) ? '+' : '-'}</span>
-                    <span>{section.group}</span>
-                    <span class="text-[10px] text-zinc-600">({section.rows.length})</span>
-                  </button>
-                </td>
-                <td class="py-1.5 pr-6 text-right border-r border-zinc-800"><PctCell value={section.avgUptime} /></td>
-                <td class="py-1.5 pr-4 text-right"><BpsCell value={section.avgBidBps} /></td>
-                <td class="py-1.5 pr-6 text-right border-r border-zinc-800"><UsdCell value={section.totalBidUsd} /></td>
-                <td class="py-1.5 pr-4 text-right"><BpsCell value={section.avgAskBps} /></td>
-                <td class="py-1.5 pr-4 text-right"><UsdCell value={section.totalAskUsd} /></td>
-              </tr>
-              {#if !isGroupCollapsed(section.group)}
-                {#each section.rows as row}
-                  <tr class="border-b border-zinc-800/50 hover:bg-zinc-800/30">
-                    <td class="py-2 pr-4 pl-4 font-medium text-zinc-200">{row.ticker}</td>
-                    <td class="py-2 pr-6 text-right border-r border-zinc-800/60"><PctCell value={row.uptimePct} /></td>
-                    <td class="py-2 pr-4 text-right"><BpsCell value={row.medianBidOuterBps} /></td>
-                    <td class="py-2 pr-6 text-right border-r border-zinc-800/60"><UsdCell value={row.medianBidTotalUsd} /></td>
-                    <td class="py-2 pr-4 text-right"><BpsCell value={row.medianAskOuterBps} /></td>
-                    <td class="py-2 pr-4 text-right"><UsdCell value={row.medianAskTotalUsd} /></td>
-                  </tr>
-                {/each}
-              {/if}
-            {/each}
-          {:else}
+    {#if groupedSections}
+      <div class="space-y-4">
+        {#each groupedSections as section}
+          <div class="rounded border border-zinc-800 bg-zinc-900/30">
+            <button
+              type="button"
+              onclick={() => toggleGroup(section.group)}
+              class="flex w-full items-center justify-between gap-3 border-b border-zinc-800 bg-zinc-800/35 px-3 py-2 text-left"
+            >
+              <span class="flex items-center gap-2">
+                <span class="mono inline-block w-3 text-zinc-400">{isGroupCollapsed(section.group) ? '+' : '-'}</span>
+                <span class="text-xs font-semibold uppercase tracking-wider text-zinc-400">{section.group}</span>
+                <span class="text-[10px] text-zinc-600">({section.rows.length})</span>
+              </span>
+            </button>
+
+            {#if !isGroupCollapsed(section.group)}
+              <div class="overflow-x-auto">
+                <table class="w-full text-sm">
+                  <thead>
+                    <tr class="text-left text-xs text-zinc-500">
+                      <th rowspan="2" class="pb-2 pl-3 pr-4 pt-3 font-medium align-bottom">
+                        <button type="button" onclick={() => toggleSort('ticker')} class="flex items-center gap-1 hover:text-zinc-300 transition-colors">
+                          Ticker{#if sortCol === 'ticker'}<span class="ml-1 text-violet-400">{sortDir === 'asc' ? '↑' : '↓'}</span>{:else}<span class="ml-1 text-zinc-700">↕</span>{/if}
+                        </button>
+                      </th>
+                      <th rowspan="2" class="pb-2 pr-6 pt-3 font-medium text-right align-bottom border-r border-zinc-800">
+                        <button type="button" onclick={() => toggleSort('uptimePct')} class="flex w-full items-center justify-end gap-1 hover:text-zinc-300 transition-colors">
+                          {#if sortCol === 'uptimePct'}<span class="text-violet-400">{sortDir === 'asc' ? '↑' : '↓'}</span>{:else}<span class="text-zinc-700">↕</span>{/if}Uptime
+                        </button>
+                      </th>
+                      <th colspan="2" class="pb-1 pr-6 pt-3 text-center font-semibold tracking-wide text-zinc-400 border-b border-zinc-700/60">Bid</th>
+                      <th colspan="2" class="pb-1 pt-3 text-center font-semibold tracking-wide text-zinc-400 border-b border-zinc-700/60">Ask</th>
+                    </tr>
+                    <tr class="border-b border-zinc-800 text-left text-xs text-zinc-500">
+                      <th class="pb-2 pr-4 font-medium text-right">
+                        <button type="button" onclick={() => toggleSort('medianBidOuterBps')} title="Median of the max bps quoted — the furthest price level at which liquidity is still posted (see Total Liq. for the size at that level)" class="flex w-full items-center justify-end gap-1 hover:text-zinc-300 transition-colors">
+                          {#if sortCol === 'medianBidOuterBps'}<span class="text-violet-400">{sortDir === 'asc' ? '↑' : '↓'}</span>{:else}<span class="text-zinc-700">↕</span>{/if}Spread (bps)
+                        </button>
+                      </th>
+                      <th class="pb-2 pr-6 font-medium text-right border-r border-zinc-800">
+                        <button type="button" onclick={() => toggleSort('medianBidTotalUsd')} class="flex w-full items-center justify-end gap-1 hover:text-zinc-300 transition-colors">
+                          {#if sortCol === 'medianBidTotalUsd'}<span class="text-violet-400">{sortDir === 'asc' ? '↑' : '↓'}</span>{:else}<span class="text-zinc-700">↕</span>{/if}Total Liq.
+                        </button>
+                      </th>
+                      <th class="pb-2 pr-4 font-medium text-right">
+                        <button type="button" onclick={() => toggleSort('medianAskOuterBps')} title="Median of the max bps quoted — the furthest price level at which liquidity is still posted (see Total Liq. for the size at that level)" class="flex w-full items-center justify-end gap-1 hover:text-zinc-300 transition-colors">
+                          {#if sortCol === 'medianAskOuterBps'}<span class="text-violet-400">{sortDir === 'asc' ? '↑' : '↓'}</span>{:else}<span class="text-zinc-700">↕</span>{/if}Spread (bps)
+                        </button>
+                      </th>
+                      <th class="pb-2 pr-4 font-medium text-right">
+                        <button type="button" onclick={() => toggleSort('medianAskTotalUsd')} class="flex w-full items-center justify-end gap-1 hover:text-zinc-300 transition-colors">
+                          {#if sortCol === 'medianAskTotalUsd'}<span class="text-violet-400">{sortDir === 'asc' ? '↑' : '↓'}</span>{:else}<span class="text-zinc-700">↕</span>{/if}Total Liq.
+                        </button>
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr class="border-b border-zinc-800/50 bg-zinc-800/20">
+                      <td class="py-2 pl-3 pr-4 text-xs font-semibold uppercase tracking-wide text-zinc-500">Group total</td>
+                      <td class="py-2 pr-6 text-right border-r border-zinc-800"><PctCell value={section.avgUptime} /></td>
+                      <td class="py-2 pr-4 text-right"><BpsCell value={section.avgBidBps} /></td>
+                      <td class="py-2 pr-6 text-right border-r border-zinc-800"><UsdCell value={section.totalBidUsd} /></td>
+                      <td class="py-2 pr-4 text-right"><BpsCell value={section.avgAskBps} /></td>
+                      <td class="py-2 pr-4 text-right"><UsdCell value={section.totalAskUsd} /></td>
+                    </tr>
+                    {#each section.rows as row}
+                      <tr class="border-b border-zinc-800/50 hover:bg-zinc-800/30">
+                        <td class="py-2 pl-3 pr-4 font-medium text-zinc-200">{row.ticker}</td>
+                        <td class="py-2 pr-6 text-right border-r border-zinc-800/60"><PctCell value={row.uptimePct} /></td>
+                        <td class="py-2 pr-4 text-right"><BpsCell value={row.medianBidOuterBps} /></td>
+                        <td class="py-2 pr-6 text-right border-r border-zinc-800/60"><UsdCell value={row.medianBidTotalUsd} /></td>
+                        <td class="py-2 pr-4 text-right"><BpsCell value={row.medianAskOuterBps} /></td>
+                        <td class="py-2 pr-4 text-right"><UsdCell value={row.medianAskTotalUsd} /></td>
+                      </tr>
+                    {/each}
+                  </tbody>
+                </table>
+              </div>
+            {/if}
+          </div>
+        {/each}
+      </div>
+    {:else}
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+          <thead>
+            <tr class="text-left text-xs text-zinc-500">
+              <th rowspan="2" class="pb-2 pr-4 font-medium align-bottom">
+                <button type="button" onclick={() => toggleSort('ticker')} class="flex items-center gap-1 hover:text-zinc-300 transition-colors">
+                  Ticker{#if sortCol === 'ticker'}<span class="ml-1 text-violet-400">{sortDir === 'asc' ? '↑' : '↓'}</span>{:else}<span class="ml-1 text-zinc-700">↕</span>{/if}
+                </button>
+              </th>
+              <th rowspan="2" class="pb-2 pr-6 font-medium text-right align-bottom border-r border-zinc-800">
+                <button type="button" onclick={() => toggleSort('uptimePct')} class="flex w-full items-center justify-end gap-1 hover:text-zinc-300 transition-colors">
+                  {#if sortCol === 'uptimePct'}<span class="text-violet-400">{sortDir === 'asc' ? '↑' : '↓'}</span>{:else}<span class="text-zinc-700">↕</span>{/if}Uptime
+                </button>
+              </th>
+              <th colspan="2" class="pb-1 pr-6 text-center font-semibold tracking-wide text-zinc-400 border-b border-zinc-700/60">Bid</th>
+              <th colspan="2" class="pb-1 text-center font-semibold tracking-wide text-zinc-400 border-b border-zinc-700/60">Ask</th>
+            </tr>
+            <tr class="border-b border-zinc-800 text-left text-xs text-zinc-500">
+              <th class="pb-2 pr-4 font-medium text-right">
+                <button type="button" onclick={() => toggleSort('medianBidOuterBps')} title="Median of the max bps quoted — the furthest price level at which liquidity is still posted (see Total Liq. for the size at that level)" class="flex w-full items-center justify-end gap-1 hover:text-zinc-300 transition-colors">
+                  {#if sortCol === 'medianBidOuterBps'}<span class="text-violet-400">{sortDir === 'asc' ? '↑' : '↓'}</span>{:else}<span class="text-zinc-700">↕</span>{/if}Spread (bps)
+                </button>
+              </th>
+              <th class="pb-2 pr-6 font-medium text-right border-r border-zinc-800">
+                <button type="button" onclick={() => toggleSort('medianBidTotalUsd')} class="flex w-full items-center justify-end gap-1 hover:text-zinc-300 transition-colors">
+                  {#if sortCol === 'medianBidTotalUsd'}<span class="text-violet-400">{sortDir === 'asc' ? '↑' : '↓'}</span>{:else}<span class="text-zinc-700">↕</span>{/if}Total Liq.
+                </button>
+              </th>
+              <th class="pb-2 pr-4 font-medium text-right">
+                <button type="button" onclick={() => toggleSort('medianAskOuterBps')} title="Median of the max bps quoted — the furthest price level at which liquidity is still posted (see Total Liq. for the size at that level)" class="flex w-full items-center justify-end gap-1 hover:text-zinc-300 transition-colors">
+                  {#if sortCol === 'medianAskOuterBps'}<span class="text-violet-400">{sortDir === 'asc' ? '↑' : '↓'}</span>{:else}<span class="text-zinc-700">↕</span>{/if}Spread (bps)
+                </button>
+              </th>
+              <th class="pb-2 pr-4 font-medium text-right">
+                <button type="button" onclick={() => toggleSort('medianAskTotalUsd')} class="flex w-full items-center justify-end gap-1 hover:text-zinc-300 transition-colors">
+                  {#if sortCol === 'medianAskTotalUsd'}<span class="text-violet-400">{sortDir === 'asc' ? '↑' : '↓'}</span>{:else}<span class="text-zinc-700">↕</span>{/if}Total Liq.
+                </button>
+              </th>
+            </tr>
+          </thead>
+          <tbody>
             {#each filteredSorted as row}
               <tr class="border-b border-zinc-800/50 hover:bg-zinc-800/30">
                 <td class="py-2 pr-4 font-medium text-zinc-200">{row.ticker}</td>
@@ -409,13 +457,13 @@
                 <td class="py-2 pr-4 text-right"><BpsCell value={row.medianBidOuterBps} /></td>
                 <td class="py-2 pr-6 text-right border-r border-zinc-800/60"><UsdCell value={row.medianBidTotalUsd} /></td>
                 <td class="py-2 pr-4 text-right"><BpsCell value={row.medianAskOuterBps} /></td>
-                <td class="py-2 text-right"><UsdCell value={row.medianAskTotalUsd} /></td>
+                <td class="py-2 pr-4 text-right"><UsdCell value={row.medianAskTotalUsd} /></td>
               </tr>
             {/each}
-          {/if}
-        </tbody>
-      </table>
-    </div>
+          </tbody>
+        </table>
+      </div>
+    {/if}
 
     {#if isPending}
       <div class="pointer-events-none absolute inset-0 rounded bg-zinc-900/55">

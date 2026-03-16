@@ -2,18 +2,15 @@
   import { useSWR } from 'sswr';
   import { page } from '$app/stores';
   import { updateParams } from '$lib/utils/params';
-  import { getFillsCache, setFillsCache, hasFreshFillsCache } from './db';
-  import { aggregateFills } from './aggregator';
+  import { hasFreshFillsCache } from './db';
+  import { loadFillsData } from './client';
   import ErrorBanner from '$lib/shared/components/ErrorBanner.svelte';
   import EmptyState from '$lib/shared/components/EmptyState.svelte';
   import UsdCell from '$lib/shared/components/UsdCell.svelte';
   import TableSkeleton from '$lib/shared/components/skeletons/TableSkeleton.svelte';
   import FillsChart from './FillsChart.svelte';
-  import type { FillsApiResponse, FillTickerRow, IndexerFill } from './types';
+  import type { FillsApiResponse, FillTickerRow } from './types';
   import type { UptimeTicker } from '$lib/shared/sla/types';
-
-  const PAGE_LIMIT = 500;
-  const MAX_PAGES = 20;
 
   const { slug, address, subaccounts, from, to }: {
     slug: string;
@@ -31,101 +28,14 @@
   // Real-time streaming progress (updated as pages arrive from the indexer)
   let fetchProgress = $state({ phase: 'idle' as 'idle' | 'streaming' | 'done', pages: 0, fills: 0 });
 
-  async function fetchAggregatedFills(key: string): Promise<FillsApiResponse> {
-    const res = await fetch(key);
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    return (await res.json()) as FillsApiResponse;
-  }
-
-  async function fetchDirectFills(key: string): Promise<FillsApiResponse> {
-    const keyParams = new URLSearchParams(key.split('?')[1]);
-    const reqFrom = keyParams.get('from')!;
-    const reqTo = keyParams.get('to')!;
-    const fromTs = `${reqFrom}T00:00:00.000Z`;
-
-    let pages = 0;
-    let fillCount = 0;
-
-    const results = await Promise.all(
-      subaccounts.map(async (subaccountNumber) => {
-        const seen = new Set<string>();
-        const fills: IndexerFill[] = [];
-        let isCapped = false;
-        let createdBeforeOrAt = `${reqTo}T23:59:59.999Z`;
-
-        for (let page = 0; page < MAX_PAGES; page++) {
-          const pageUrl = new URL('https://indexer.dydx.trade/v4/fills');
-          pageUrl.searchParams.set('address', address);
-          pageUrl.searchParams.set('subaccountNumber', String(subaccountNumber));
-          pageUrl.searchParams.set('limit', String(PAGE_LIMIT));
-          pageUrl.searchParams.set('createdBeforeOrAt', createdBeforeOrAt);
-
-          const res = await fetch(pageUrl.toString());
-          if (!res.ok) throw new Error(`Indexer ${res.status} for sub ${subaccountNumber}`);
-
-          const body = (await res.json()) as { fills?: IndexerFill[] };
-          const pageFills = body.fills ?? [];
-          if (pageFills.length === 0) break;
-
-          let addedThisPage = 0;
-          for (const fill of pageFills) {
-            if (!seen.has(fill.id) && fill.createdAt >= fromTs) {
-              seen.add(fill.id);
-              fills.push(fill);
-              addedThisPage += 1;
-            }
-          }
-
-          if (addedThisPage > 0 && key === fillsKey) {
-            pages += 1;
-            fillCount += addedThisPage;
-            fetchProgress = { phase: 'streaming', pages, fills: fillCount };
-          }
-
-          const oldest = pageFills[pageFills.length - 1];
-          if (oldest.createdAt < fromTs) break;
-          if (pageFills.length < PAGE_LIMIT) break;
-          if (page === MAX_PAGES - 1) {
-            isCapped = true;
-            break;
-          }
-
-          createdBeforeOrAt = oldest.createdAt;
-        }
-
-        return { fills, isCapped };
-      })
-    );
-
-    const allFills = results.flatMap((result) => result.fills);
-    const isCapped = results.some((result) => result.isCapped);
-
-    if (key === fillsKey) {
-      fetchProgress = { phase: 'done', pages, fills: allFills.length };
-    }
-
-    await setFillsCache(key, { fills: allFills, isCapped, from: reqFrom, to: reqTo });
-    return aggregateFills(allFills, reqFrom, reqTo, isCapped);
-  }
-
   async function fillsFetcher(key: string): Promise<FillsApiResponse> {
-    // 1. Try IndexedDB cache first
-    const cached = await getFillsCache(key);
-    if (cached) {
-      return aggregateFills(cached.fills, cached.from, cached.to, cached.isCapped);
-    }
-
-    // 2. Fetch directly from the dYdX indexer.
-    fetchProgress = { phase: 'streaming', pages: 0, fills: 0 };
-    try {
-      return await fetchDirectFills(key);
-    } catch (directError) {
-      if (key === fillsKey) {
-        fetchProgress = { phase: 'idle', pages: 0, fills: 0 };
+    return loadFillsData(key, {
+      address,
+      subaccounts,
+      onProgress: (next) => {
+        if (key === fillsKey) fetchProgress = next;
       }
-      console.warn('fills direct fallback', directError);
-      return fetchAggregatedFills(key);
-    }
+    });
   }
 
   const { data, error, isLoading } = useSWR<FillsApiResponse>(
@@ -242,7 +152,7 @@
   }
 
   function isGroupCollapsed(group: string): boolean {
-    return Boolean(collapsedGroups[group]);
+    return collapsedGroups[group] ?? true;
   }
 
   const groupedSections = $derived.by((): GroupedSection[] | null => {
@@ -346,22 +256,6 @@
   </div>
 </div>
 
-<!-- ── Range status bar ─────────────────────────────────────────────────── -->
-<div class="mb-3 flex items-center gap-2 text-xs">
-  {#if dataIsFresh}
-    <span class="text-zinc-500">Showing</span>
-    <span class="mono text-zinc-300">{$data?.from} → {$data?.to}</span>
-    {#if cacheHint === 'cached' && !showRefreshOverlay}
-      <span class="rounded bg-zinc-800 px-1.5 py-0.5 text-[10px] text-zinc-500">cached</span>
-    {/if}
-    {#if showRefreshOverlay}
-      <span class="text-violet-400 animate-pulse">· refreshing…</span>
-    {/if}
-  {:else if showSkeleton}
-    <span class="mono text-zinc-500">{from} to {to}</span>
-  {/if}
-</div>
-
 <!-- ── Summary cards ─────────────────────────────────────────────────────── -->
 {#if dataIsFresh && $data}
   <div class="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
@@ -371,16 +265,15 @@
     </div>
     <div class="rounded border border-zinc-800 bg-zinc-800/30 px-3 py-2">
       <div class="text-[10px] uppercase tracking-wide text-zinc-500">Maker Volume</div>
-      <div class="mt-0.5 text-base font-semibold text-sky-400 mono">{fmtVol($data.summary.makerVolume)}</div>
+      <div class="mt-0.5 text-base font-semibold text-emerald-400 mono">{fmtVol($data.summary.makerVolume)}</div>
     </div>
     <div class="rounded border border-zinc-800 bg-zinc-800/30 px-3 py-2">
       <div class="text-[10px] uppercase tracking-wide text-zinc-500">Taker Volume</div>
-      <div class="mt-0.5 text-base font-semibold text-pink-400 mono">{fmtVol($data.summary.takerVolume)}</div>
+      <div class="mt-0.5 text-base font-semibold text-red-400 mono">{fmtVol($data.summary.takerVolume)}</div>
     </div>
     <div class="rounded border border-zinc-800 bg-zinc-800/30 px-3 py-2">
       <div class="text-[10px] uppercase tracking-wide text-zinc-500">Net Fees</div>
-      <div class="mt-0.5 text-base font-semibold mono
-        {$data.summary.netFees < 0 ? 'text-emerald-400' : $data.summary.netFees > 0 ? 'text-amber-400' : 'text-zinc-400'}">
+      <div class="mt-0.5 text-base font-semibold text-violet-400 mono">
         {fmtFee($data.summary.netFees)}
       </div>
     </div>
@@ -506,17 +399,17 @@
                 {#each section.rows as row}
                   <tr class="border-b border-zinc-800/50 hover:bg-zinc-800/30">
                     <td class="py-2 pl-4 pr-4 font-medium text-zinc-200">{row.ticker}</td>
-                    <td class="py-2 pr-4 text-right text-sky-400/80 mono text-xs"><UsdCell value={row.makerVolume} /></td>
-                    <td class="py-2 pr-4 text-right text-pink-400/80 mono text-xs"><UsdCell value={row.takerVolume} /></td>
+                    <td class="py-2 pr-4 text-right text-emerald-400/80 mono text-xs"><UsdCell value={row.makerVolume} /></td>
+                    <td class="py-2 pr-4 text-right text-red-400/80 mono text-xs"><UsdCell value={row.takerVolume} /></td>
                     <td class="py-2 pr-4 text-right border-r border-zinc-800/60"><UsdCell value={row.totalVolume} /></td>
                     {#if showFees}
-                      <td class="py-2 pr-4 text-right mono text-xs {row.makerFees < 0 ? 'text-emerald-400' : 'text-amber-400'}">
+                      <td class="py-2 pr-4 text-right mono text-xs text-violet-400">
                         {fmtFee(row.makerFees)}
                       </td>
-                      <td class="py-2 pr-4 text-right mono text-xs {row.takerFees < 0 ? 'text-emerald-400' : 'text-amber-400'}">
+                      <td class="py-2 pr-4 text-right mono text-xs text-violet-400">
                         {fmtFee(row.takerFees)}
                       </td>
-                      <td class="py-2 pr-4 text-right border-r border-zinc-800/60 mono text-xs {row.netFees < 0 ? 'text-emerald-400' : 'text-amber-400'}">
+                      <td class="py-2 pr-4 text-right border-r border-zinc-800/60 mono text-xs text-violet-400">
                         {fmtFee(row.netFees)}
                       </td>
                     {/if}
@@ -529,17 +422,17 @@
             {#each sortedRows as row}
               <tr class="border-b border-zinc-800/50 hover:bg-zinc-800/30">
                 <td class="py-2 pr-4 font-medium text-zinc-200">{row.ticker}</td>
-                <td class="py-2 pr-4 text-right text-sky-400/80 mono text-xs"><UsdCell value={row.makerVolume} /></td>
-                <td class="py-2 pr-4 text-right text-pink-400/80 mono text-xs"><UsdCell value={row.takerVolume} /></td>
+                <td class="py-2 pr-4 text-right text-emerald-400/80 mono text-xs"><UsdCell value={row.makerVolume} /></td>
+                <td class="py-2 pr-4 text-right text-red-400/80 mono text-xs"><UsdCell value={row.takerVolume} /></td>
                 <td class="py-2 pr-4 text-right border-r border-zinc-800/60"><UsdCell value={row.totalVolume} /></td>
                 {#if showFees}
-                  <td class="py-2 pr-4 text-right mono text-xs {row.makerFees < 0 ? 'text-emerald-400' : 'text-amber-400'}">
+                  <td class="py-2 pr-4 text-right mono text-xs text-violet-400">
                     {fmtFee(row.makerFees)}
                   </td>
-                  <td class="py-2 pr-4 text-right mono text-xs {row.takerFees < 0 ? 'text-emerald-400' : 'text-amber-400'}">
+                  <td class="py-2 pr-4 text-right mono text-xs text-violet-400">
                     {fmtFee(row.takerFees)}
                   </td>
-                  <td class="py-2 pr-4 text-right border-r border-zinc-800/60 mono text-xs {row.netFees < 0 ? 'text-emerald-400' : 'text-amber-400'}">
+                  <td class="py-2 pr-4 text-right border-r border-zinc-800/60 mono text-xs text-violet-400">
                     {fmtFee(row.netFees)}
                   </td>
                 {/if}

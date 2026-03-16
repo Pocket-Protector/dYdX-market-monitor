@@ -89,6 +89,8 @@
   {#if browser}
     <TabPrefetcher
       slug={data.mm.slug}
+      address={data.mm.address}
+      subaccounts={data.mm.subaccounts}
       from={data.from}
       to={data.to}
       bpsLeeway={data.bpsLeeway}

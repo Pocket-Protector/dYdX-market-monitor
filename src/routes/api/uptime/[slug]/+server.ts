@@ -16,7 +16,7 @@ export const GET: RequestHandler = async ({ params, url }) => {
   try {
     const raw = await apiFetch(`/uptime/${mm.address}`, { from, to, bpsLeeway });
     const parsed = UptimeResponseSchema.parse(raw);
-    return json(parsed.data);
+    return json({ ...parsed.data, mm: slug });
   } catch (e) {
     return json({ error: String(e) }, { status: 502 });
   }
