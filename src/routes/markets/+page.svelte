@@ -267,7 +267,8 @@
   {:else if view === 'treemap'}
     <TreemapView rows={filtered} />
   {:else}
-    <div class="overflow-x-auto rounded-lg border border-zinc-800">
+    <div class="overflow-x-auto">
+      <div class="w-fit rounded-lg border border-zinc-800">
       <table class="min-w-max text-sm">
         <thead>
           <tr class="border-b border-zinc-800 bg-zinc-900/60">
@@ -310,6 +311,7 @@
           {/each}
         </tbody>
       </table>
+      </div>
     </div>
   {/if}
 </PageShell>
