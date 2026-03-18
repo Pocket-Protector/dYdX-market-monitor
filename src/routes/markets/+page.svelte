@@ -80,7 +80,9 @@
       if (sortKey === 'stepSize') {
         const af = parseFloat(a.stepSize) || 0;
         const bf = parseFloat(b.stepSize) || 0;
-        return sortDir === 'asc' ? af - bf : bf - af;
+        const av2 = stepSizeView === 'usd' ? af * a.oraclePrice : af;
+        const bv2 = stepSizeView === 'usd' ? bf * b.oraclePrice : bf;
+        return sortDir === 'asc' ? av2 - bv2 : bv2 - av2;
       }
       if (typeof av === 'string' && typeof bv === 'string') {
         return sortDir === 'asc' ? av.localeCompare(bv) : bv.localeCompare(av);
@@ -130,10 +132,14 @@
   function fmtStepSize(row: MarketRow): string {
     if (!row.stepSize) return '—';
     if (stepSizeView === 'native') {
-      return `${row.stepSize} ${shortTicker(row.ticker)}`;
+      const base = row.ticker.split('-')[0];
+      return `${row.stepSize} ${base}`;
     }
     const usd = parseFloat(row.stepSize) * row.oraclePrice;
-    return fmtVol(usd);
+    if (usd === 0) return '—';
+    if (usd >= 1_000_000) return `$${(usd / 1_000_000).toFixed(2)}M`;
+    if (usd >= 1_000) return `$${(usd / 1_000).toFixed(2)}K`;
+    return `$${usd.toFixed(2)}`;
   }
 
   function fmtLeverage(val: number | null): string {
