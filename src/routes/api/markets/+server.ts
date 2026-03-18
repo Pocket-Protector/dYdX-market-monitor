@@ -27,6 +27,7 @@ export const GET: RequestHandler = async ({ fetch }) => {
     const trades24h = parseInt(m.trades24H, 10) || 0;
     const nextFundingRate = parseFloat(m.nextFundingRate) || 0;
     const tickSize = parseFloat(m.tickSize) || 0;
+    const initialMarginFraction = parseFloat(m.initialMarginFraction) || 0;
 
     return {
       clobPairId: m.clobPairId,
@@ -37,10 +38,12 @@ export const GET: RequestHandler = async ({ fetch }) => {
       volume24h,
       openInterestNotional: openInterest * oraclePrice,
       trades24h,
-      fundingRateAnnualized: nextFundingRate !== 0 ? nextFundingRate * 876000 : null,
+      nextFundingRate: nextFundingRate !== 0 ? nextFundingRate : null,
       tickSize: m.tickSize,
       tickSpreadBps: oraclePrice > 0 ? (tickSize / oraclePrice) * 10000 : null,
-      priceChange24H: parseFloat(m.priceChange24H) || 0
+      priceChange24H: parseFloat(m.priceChange24H) || 0,
+      maxLeverage: initialMarginFraction > 0 ? 1 / initialMarginFraction : null,
+      stepSize: m.stepSize as string
     };
   });
 
