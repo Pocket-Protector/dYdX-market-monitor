@@ -35,7 +35,7 @@
   let fundingTimeframe = $state<'ann' | '8h' | '1h'>('ann');
   let stepSizeView = $state<'native' | 'usd'>('native');
 
-  const { data, error, isLoading } = useSWR<MarketRow[]>(() => browser ? '/api/markets' : null, {
+  const { data, error, isLoading } = useSWR<MarketRow[]>(() => '/api/markets', {
     refreshInterval: 15_000
   });
 
