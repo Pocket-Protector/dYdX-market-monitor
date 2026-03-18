@@ -16,10 +16,12 @@
     volume24h: number;
     openInterestNotional: number;
     trades24h: number;
-    fundingRateAnnualized: number | null;
+    nextFundingRate: number | null;
     tickSize: string;
     tickSpreadBps: number | null;
     priceChange24H: number;
+    maxLeverage: number | null;
+    stepSize: string;
   }
 
   type SortKey = keyof MarketRow;
@@ -30,6 +32,8 @@
   let marketTypeFilter = $state('all');
   let sortKey = $state<SortKey>('volume24h');
   let sortDir = $state<'asc' | 'desc'>('desc');
+  let fundingTimeframe = $state<'ann' | '8h' | '1h'>('ann');
+  let stepSizeView = $state<'native' | 'usd'>('native');
 
   const { data, error, isLoading } = useSWR<MarketRow[]>(() => '/api/markets', {
     refreshInterval: 15_000
@@ -72,6 +76,12 @@
       if (av == null && bv == null) return 0;
       if (av == null) return 1;
       if (bv == null) return -1;
+      // Special case: stepSize is a numeric string — sort numerically
+      if (sortKey === 'stepSize') {
+        const af = parseFloat(a.stepSize) || 0;
+        const bf = parseFloat(b.stepSize) || 0;
+        return sortDir === 'asc' ? af - bf : bf - af;
+      }
       if (typeof av === 'string' && typeof bv === 'string') {
         return sortDir === 'asc' ? av.localeCompare(bv) : bv.localeCompare(av);
       }
@@ -99,9 +109,10 @@
     return `$${val.toFixed(0)}`;
   }
 
-  function fmtFunding(val: number | null): string {
-    if (val == null) return '—';
-    return `${val.toFixed(2)}%`;
+  function fmtFunding(rate: number | null): string {
+    if (rate == null) return '—';
+    const multiplier = fundingTimeframe === 'ann' ? 876000 : fundingTimeframe === '8h' ? 800 : 100;
+    return `${(rate * multiplier).toFixed(4)}%`;
   }
 
   function fundingClass(val: number | null): string {
@@ -116,6 +127,20 @@
     return val.toFixed(2);
   }
 
+  function fmtStepSize(row: MarketRow): string {
+    if (!row.stepSize) return '—';
+    if (stepSizeView === 'native') {
+      return `${row.stepSize} ${shortTicker(row.ticker)}`;
+    }
+    const usd = parseFloat(row.stepSize) * row.oraclePrice;
+    return fmtVol(usd);
+  }
+
+  function fmtLeverage(val: number | null): string {
+    if (val == null) return '—';
+    return `${val}x`;
+  }
+
   function statusBadge(s: string): string {
     if (s === 'ACTIVE') return 'bg-emerald-400/15 text-emerald-400';
     if (s === 'FINAL_SETTLEMENT') return 'bg-red-400/15 text-red-400';
@@ -127,17 +152,27 @@
     return 'bg-sky-400/15 text-sky-400';
   }
 
-  const columns: { key: SortKey; label: string; align: 'left' | 'right' }[] = [
-    { key: 'ticker', label: 'Ticker', align: 'left' },
-    { key: 'status', label: 'Status', align: 'left' },
-    { key: 'marketType', label: 'Type', align: 'left' },
-    { key: 'oraclePrice', label: 'Oracle Price', align: 'right' },
-    { key: 'volume24h', label: 'Volume 24H', align: 'right' },
-    { key: 'openInterestNotional', label: 'Open Interest', align: 'right' },
-    { key: 'trades24h', label: 'Trades 24H', align: 'right' },
-    { key: 'fundingRateAnnualized', label: 'Funding (Ann.)', align: 'right' },
-    { key: 'tickSpreadBps', label: 'Tick Spread (bps)', align: 'right' }
-  ];
+  const fundingLabel = $derived(
+    fundingTimeframe === 'ann' ? 'Funding (Ann.)' :
+    fundingTimeframe === '8h'  ? 'Funding (8hr)'  : 'Funding (1hr)'
+  );
+  const stepSizeLabel = $derived(
+    stepSizeView === 'native' ? 'Min Order (native)' : 'Min Order (USD)'
+  );
+
+  const columns = $derived([
+    { key: 'ticker' as SortKey,               label: 'Ticker',            align: 'left' as const  },
+    { key: 'status' as SortKey,               label: 'Status',            align: 'left' as const  },
+    { key: 'marketType' as SortKey,           label: 'Type',              align: 'left' as const  },
+    { key: 'oraclePrice' as SortKey,          label: 'Oracle Price',      align: 'right' as const },
+    { key: 'volume24h' as SortKey,            label: 'Volume 24H',        align: 'right' as const },
+    { key: 'openInterestNotional' as SortKey, label: 'Open Interest',     align: 'right' as const },
+    { key: 'trades24h' as SortKey,            label: 'Trades 24H',        align: 'right' as const },
+    { key: 'nextFundingRate' as SortKey,      label: fundingLabel,        align: 'right' as const },
+    { key: 'tickSpreadBps' as SortKey,        label: 'Tick Spread (bps)', align: 'right' as const },
+    { key: 'maxLeverage' as SortKey,          label: 'Max Leverage',      align: 'right' as const },
+    { key: 'stepSize' as SortKey,             label: stepSizeLabel,       align: 'right' as const },
+  ]);
 </script>
 
 <PageShell>
@@ -191,6 +226,25 @@
       <option value="ISOLATED">Isolated</option>
     </select>
 
+    {#if view === 'table'}
+      <select
+        bind:value={fundingTimeframe}
+        class="rounded border border-zinc-700 bg-zinc-900 px-3 py-1.5 text-xs text-zinc-200 focus:border-violet-500 focus:outline-none"
+      >
+        <option value="ann">Funding Ann.</option>
+        <option value="8h">Funding 8hr</option>
+        <option value="1h">Funding 1hr</option>
+      </select>
+
+      <select
+        bind:value={stepSizeView}
+        class="rounded border border-zinc-700 bg-zinc-900 px-3 py-1.5 text-xs text-zinc-200 focus:border-violet-500 focus:outline-none"
+      >
+        <option value="native">Min Order (native)</option>
+        <option value="usd">Min Order (USD)</option>
+      </select>
+    {/if}
+
     {#if $data}
       <span class="ml-auto text-xs text-zinc-500">
         {filtered.length} / {$data.length} markets
@@ -242,8 +296,10 @@
               <td class="whitespace-nowrap px-3 py-2 text-right mono text-zinc-100">{fmtVol(row.volume24h)}</td>
               <td class="whitespace-nowrap px-3 py-2 text-right mono text-zinc-100">{fmtVol(row.openInterestNotional)}</td>
               <td class="whitespace-nowrap px-3 py-2 text-right mono text-zinc-300">{row.trades24h > 0 ? row.trades24h.toLocaleString() : '—'}</td>
-              <td class="whitespace-nowrap px-3 py-2 text-right mono {fundingClass(row.fundingRateAnnualized)}">{fmtFunding(row.fundingRateAnnualized)}</td>
+              <td class="whitespace-nowrap px-3 py-2 text-right mono {fundingClass(row.nextFundingRate)}">{fmtFunding(row.nextFundingRate)}</td>
               <td class="whitespace-nowrap px-3 py-2 text-right mono text-zinc-300">{fmtSpread(row.tickSpreadBps)}</td>
+              <td class="whitespace-nowrap px-3 py-2 text-right mono text-zinc-200">{fmtLeverage(row.maxLeverage)}</td>
+              <td class="whitespace-nowrap px-3 py-2 text-right mono text-zinc-300">{fmtStepSize(row)}</td>
             </tr>
           {/each}
         </tbody>

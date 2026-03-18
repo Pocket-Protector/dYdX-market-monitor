@@ -10,7 +10,7 @@
     volume24h: number;
     openInterestNotional: number;
     trades24h: number;
-    fundingRateAnnualized: number | null;
+    nextFundingRate: number | null;
     tickSize: string;
     tickSpreadBps: number | null;
     priceChange24H: number;
