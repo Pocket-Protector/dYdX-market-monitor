@@ -132,7 +132,7 @@
   function fmtStepSize(row: MarketRow): string {
     if (!row.stepSize) return '—';
     if (stepSizeView === 'native') {
-      const base = row.ticker.split('-')[0];
+      const base = shortTicker(row.ticker).split('-')[0];
       return `${row.stepSize} ${base}`;
     }
     const usd = parseFloat(row.stepSize) * row.oraclePrice;
@@ -268,7 +268,7 @@
     <TreemapView rows={filtered} />
   {:else}
     <div class="overflow-x-auto rounded-lg border border-zinc-800">
-      <table class="w-full text-sm">
+      <table class="min-w-max text-sm">
         <thead>
           <tr class="border-b border-zinc-800 bg-zinc-900/60">
             {#each columns as col}
