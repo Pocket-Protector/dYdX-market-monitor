@@ -43,7 +43,7 @@ export const GET: RequestHandler = async ({ fetch }) => {
       tickSpreadBps: oraclePrice > 0 ? (tickSize / oraclePrice) * 10000 : null,
       priceChange24H: parseFloat(m.priceChange24H) || 0,
       maxLeverage: initialMarginFraction > 0 ? 1 / initialMarginFraction : null,
-      stepSize: m.stepSize as string
+      stepSize: m.stepSize
     };
   });
 
