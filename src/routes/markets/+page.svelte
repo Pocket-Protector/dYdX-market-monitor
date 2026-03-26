@@ -35,9 +35,16 @@
   let fundingTimeframe = $state<'ann' | '8h' | '1h'>('ann');
   let stepSizeView = $state<'native' | 'usd'>('native');
 
-  const { data, error, isLoading } = useSWR<MarketRow[]>(() => '/api/markets', {
-    refreshInterval: 15_000
-  });
+  const { data, error, isLoading, revalidate } = useSWR<MarketRow[]>(() => '/api/markets');
+
+  let refreshing = $state(false);
+
+  async function handleRefresh() {
+    refreshing = true;
+    const minDelay = new Promise((r) => setTimeout(r, 400));
+    await Promise.all([revalidate(), minDelay]);
+    refreshing = false;
+  }
 
   function toggleSort(key: SortKey) {
     if (sortKey === key) {
@@ -100,12 +107,13 @@
     if (val >= 1) return val.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 4 });
     if (val >= 0.01) return val.toFixed(4);
     if (val >= 0.0001) return val.toFixed(6);
-    const s = val.toExponential(3);
-    return s;
+    // For very small prices (PEPE, SHIB etc.) show leading zeros + 4 significant digits
+    const leadingZeros = Math.floor(-Math.log10(val));
+    return val.toFixed(leadingZeros + 4);
   }
 
   function fmtVol(val: number): string {
-    if (val === 0) return '—';
+    if (val === 0) return '$0';
     if (val >= 1_000_000) return `$${(val / 1_000_000).toFixed(2)}M`;
     if (val >= 1_000) return `$${(val / 1_000).toFixed(1)}K`;
     return `$${val.toFixed(0)}`;
@@ -185,7 +193,7 @@
   <div class="mb-6">
     <h1 class="text-2xl font-semibold text-zinc-100">Live Metrics</h1>
     <p class="mt-1 text-sm text-zinc-400">
-      Real-time dYdX v4 perpetual markets — auto-refreshes every 15s
+      Real-time dYdX v4 perpetual markets
     </p>
   </div>
 
@@ -251,6 +259,14 @@
       </select>
     {/if}
 
+    <button
+      class="rounded bg-violet-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-violet-500 disabled:opacity-50"
+      onclick={handleRefresh}
+      disabled={refreshing}
+    >
+      {refreshing ? 'Refreshing…' : 'Refresh'}
+    </button>
+
     {#if $data}
       <span class="ml-auto text-xs text-zinc-500">
         {filtered.length} / {$data.length} markets
@@ -265,9 +281,17 @@
   {:else if filtered.length === 0}
     <p class="py-8 text-center text-sm text-zinc-500">No markets match your filters.</p>
   {:else if view === 'treemap'}
-    <TreemapView rows={filtered} />
+    <div class="relative">
+      {#if refreshing}
+        <div class="absolute inset-0 z-10 rounded-lg bg-zinc-950/40 animate-pulse"></div>
+      {/if}
+      <TreemapView rows={filtered} />
+    </div>
   {:else}
-    <div class="overflow-x-auto">
+    <div class="relative overflow-x-auto">
+      {#if refreshing}
+        <div class="absolute inset-0 z-10 rounded-lg skeleton"></div>
+      {/if}
       <div class="w-fit rounded-lg border border-zinc-800">
       <table class="min-w-max text-sm">
         <thead>
@@ -302,7 +326,7 @@
               <td class="whitespace-nowrap px-3 py-2 text-right mono text-zinc-100">{fmtPrice(row.oraclePrice)}</td>
               <td class="whitespace-nowrap px-3 py-2 text-right mono text-zinc-100">{fmtVol(row.volume24h)}</td>
               <td class="whitespace-nowrap px-3 py-2 text-right mono text-zinc-100">{fmtVol(row.openInterestNotional)}</td>
-              <td class="whitespace-nowrap px-3 py-2 text-right mono text-zinc-300">{row.trades24h > 0 ? row.trades24h.toLocaleString() : '—'}</td>
+              <td class="whitespace-nowrap px-3 py-2 text-right mono text-zinc-300">{row.trades24h.toLocaleString()}</td>
               <td class="whitespace-nowrap px-3 py-2 text-right mono {fundingClass(row.nextFundingRate)}">{fmtFunding(row.nextFundingRate)}</td>
               <td class="whitespace-nowrap px-3 py-2 text-right mono text-zinc-300">{fmtSpread(row.tickSpreadBps)}</td>
               <td class="whitespace-nowrap px-3 py-2 text-right mono text-zinc-200">{fmtLeverage(row.maxLeverage)}</td>

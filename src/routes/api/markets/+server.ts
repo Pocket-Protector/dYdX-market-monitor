@@ -25,7 +25,8 @@ export const GET: RequestHandler = async ({ fetch }) => {
     const volume24h = parseFloat(m.volume24H) || 0;
     const openInterest = parseFloat(m.openInterest) || 0;
     const trades24h = parseInt(m.trades24H, 10) || 0;
-    const nextFundingRate = parseFloat(m.nextFundingRate) || 0;
+    const parsedFunding = parseFloat(m.nextFundingRate);
+    const nextFundingRate = Number.isFinite(parsedFunding) ? parsedFunding : null;
     const tickSize = parseFloat(m.tickSize) || 0;
     const initialMarginFraction = parseFloat(m.initialMarginFraction) || 0;
 
@@ -38,7 +39,7 @@ export const GET: RequestHandler = async ({ fetch }) => {
       volume24h,
       openInterestNotional: openInterest * oraclePrice,
       trades24h,
-      nextFundingRate: nextFundingRate !== 0 ? nextFundingRate : null,
+      nextFundingRate,
       tickSize: m.tickSize,
       tickSpreadBps: oraclePrice > 0 ? (tickSize / oraclePrice) * 10000 : null,
       priceChange24H: parseFloat(m.priceChange24H) || 0,
