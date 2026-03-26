@@ -10,7 +10,8 @@ export const LevelPctSchema = z.object({
 export const LevelThresholdSchema = z.object({
   usd: z.number(),
   bps: z.number(),
-  bpsEffective: z.number()
+  bpsEffective: z.number(),
+  tickSpreadBps: z.number().optional()
 });
 
 export const UptimeTickerSchema = z.object({
@@ -42,7 +43,7 @@ export const UptimeResponseSchema = z.object({
     mm: z.string(),
     from: z.string(),
     to: z.string(),
-    bpsLeeway: z.number(),
+    tickSizeAdj: z.boolean(),
     tickers: z.array(UptimeTickerSchema)
   })
 });

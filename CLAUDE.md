@@ -54,14 +54,14 @@ src/
       +page.server.ts         # MM list server load
       +page.svelte            # MM list page (/mm)
       [slug]/
-        +page.server.ts       # Resolves MM config; sets from/to/bpsLeeway
+        +page.server.ts       # Resolves MM config; sets from/to
         +page.svelte          # Main MM detail page (tabs + range selector)
     markets/
       +page.svelte            # Live market treemap (/markets)
     api/
       mms/+server.ts          # GET /api/mms — list of MMs
       summary/+server.ts      # GET /api/summary?slug&from&to&ticker
-      uptime/[slug]/+server.ts # GET /api/uptime/[slug]?from&to&bpsLeeway
+      uptime/[slug]/+server.ts # GET /api/uptime/[slug]?from&to&tickSizeAdj
       liquidity/+server.ts    # GET /api/liquidity?slug&from&to&bps
       liquidity-sla/+server.ts
       depth/+server.ts        # GET /api/depth?slug&from&to&usd
@@ -163,7 +163,7 @@ go in `shared/` or `lib/utils/`.
 +page.server.ts
   └── Reads mm-config.json via getMmBySlug(slug)
   └── Computes from/to from URL params (defaults: 24h ago → today)
-  └── Returns { mm, from, to, bpsLeeway }
+  └── Returns { mm, from, to }
 
 +page.svelte (client)
   └── Renders tab nav + TimeRangeSelector

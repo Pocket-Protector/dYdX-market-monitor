@@ -69,12 +69,12 @@
     mm: string;
     from: string;
     to: string;
-    bpsLeeway: number;
+    tickSizeAdj: boolean;
     tickers: UptimeTicker[];
   }
 
   const { data: uptimeData, isLoading: uptimeLoading } = useSWR<UptimePayload>(
-    () => `/api/uptime/${slug}?from=${from}&to=${to}&bpsLeeway=0`,
+    () => `/api/uptime/${slug}?from=${from}&to=${to}&tickSizeAdj=true`,
     { refreshInterval: 0, dedupingInterval: 1_800_000 }
   );
 

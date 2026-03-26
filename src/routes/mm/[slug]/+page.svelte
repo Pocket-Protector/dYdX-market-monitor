@@ -78,7 +78,7 @@
     {:else if activeTab === 'summary'}
       <SummaryTab slug={data.mm.slug} from={data.from} to={data.to} />
     {:else if activeTab === 'uptime'}
-      <UptimeTab slug={data.mm.slug} from={data.from} to={data.to} bpsLeeway={data.bpsLeeway} />
+      <UptimeTab slug={data.mm.slug} from={data.from} to={data.to} />
     {:else if activeTab === 'liquidity'}
       <LiquidityTab slug={data.mm.slug} from={data.from} to={data.to} {bps} />
     {:else if activeTab === 'depth'}
@@ -93,7 +93,6 @@
       subaccounts={data.mm.subaccounts}
       from={data.from}
       to={data.to}
-      bpsLeeway={data.bpsLeeway}
       {bps}
       {usd}
       {activeTab}

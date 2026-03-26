@@ -79,14 +79,12 @@
     mm: string;
     from: string;
     to: string;
-    bpsLeeway: number;
+    tickSizeAdj: boolean;
     tickers: UptimeTicker[];
   }
 
-  const activeLeeway = $derived(parseFloat($page.url.searchParams.get('leeway') ?? '0'));
-
   const { data: uptimeData, isLoading: uptimeLoading } = useSWR<UptimePayload>(
-    () => `/api/uptime/${slug}?from=${from}&to=${to}&bpsLeeway=${activeLeeway}`,
+    () => `/api/uptime/${slug}?from=${from}&to=${to}&tickSizeAdj=true`,
     { refreshInterval: 60_000, dedupingInterval: 1_800_000 }
   );
 

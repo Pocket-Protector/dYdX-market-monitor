@@ -11,12 +11,9 @@ export const load: PageServerLoad = async ({ params, url }) => {
   const defaultRange = presetToFromTo('24h');
   const from = url.searchParams.get('from') ?? defaultRange.from;
   const to = url.searchParams.get('to') ?? defaultRange.to;
-  const bpsLeeway = url.searchParams.get('leeway') ?? '0';
-
   return {
     mm: { slug: mm.slug, name: mm.name, address: mm.address, subaccounts: mm.subaccounts },
     from,
-    to,
-    bpsLeeway: parseFloat(bpsLeeway)
+    to
   };
 };

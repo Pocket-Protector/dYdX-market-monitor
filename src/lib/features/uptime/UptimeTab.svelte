@@ -12,58 +12,38 @@
     mm: string;
     from: string;
     to: string;
-    bpsLeeway: number;
+    tickSizeAdj: boolean;
     tickers: UptimeTicker[];
   }
 
   const {
     slug,
     from,
-    to,
-    bpsLeeway
-  }: { slug: string; from: string; to: string; bpsLeeway: number } = $props();
+    to
+  }: { slug: string; from: string; to: string } = $props();
 
-  let leewayInput = $state('');
   let showBid = $state(false);
   let showAsk = $state(false);
-  const showCombined = true;
+  let showCombined = $state(true);
   let collapsedGroups = $state<Record<string, boolean>>({});
   let progressStartedAt = $state<number | null>(null);
   let progressNow = $state(Date.now());
   let progressKey = $state('');
 
-  const activeLeeway = $derived(parseFloat($page.url.searchParams.get('leeway') ?? String(bpsLeeway)));
-  const requestedLeeway = $derived(Number.isFinite(activeLeeway) ? activeLeeway : bpsLeeway);
-
-  // Sync the input field when the URL-driven leeway changes
-  $effect(() => {
-    leewayInput = String(Math.round(requestedLeeway * 100));
-  });
-
-  function sameLeeway(a: number, b: number): boolean {
-    return Math.abs(a - b) < 0.0001;
-  }
+  const tickSizeAdj = $derived($page.url.searchParams.get('tickAdj') !== '0');
 
   function isAbortError(error: unknown): boolean {
     return error instanceof Error && error.name === 'AbortError';
   }
 
-  function applyLeeway() {
-    const pct = parseInt(leewayInput, 10);
-    if (!Number.isFinite(pct)) return;
-    const clamped = Math.max(0, Math.min(50, pct));
-    const normalized = clamped / 100;
-
-    if (sameLeeway(normalized, requestedLeeway)) return;
-
-    const next = normalized.toFixed(2).replace(/\.?0+$/, '');
-    updateParams({ leeway: next });
+  function toggleTickAdj() {
+    updateParams({ tickAdj: tickSizeAdj ? '0' : '1' });
   }
 
-  const uptimeKey = $derived(`/api/uptime/${slug}?from=${from}&to=${to}&bpsLeeway=${requestedLeeway}`);
+  const uptimeKey = $derived(`/api/uptime/${slug}?from=${from}&to=${to}&tickSizeAdj=${tickSizeAdj}`);
 
   // Manual fetch instead of useSWR — sswr resolves the key once at mount
-  // and never re-fetches when the key changes (e.g. leeway update).
+  // and never re-fetches when the key changes (e.g. tickSizeAdj toggle).
   let responseData = $state<UptimePayload | null>(null);
   let fetchError = $state<Error | null>(null);
   let isFetching = $state(false);
@@ -145,7 +125,7 @@
     if (!responseData) return null;
     if (responseData.mm !== slug) return null;
     if (responseData.from !== from || responseData.to !== to) return null;
-    if (!sameLeeway(responseData.bpsLeeway, requestedLeeway)) return null;
+    if (responseData.tickSizeAdj !== tickSizeAdj) return null;
     return responseData;
   });
 
@@ -162,7 +142,7 @@
   const progressLabel = $derived(showSkeleton ? 'Loading uptime data...' : 'Refreshing uptime data...');
   const progressDetail = $derived.by(() => {
     if (showSkeleton) {
-      return `Computing uptime with ${Math.round(requestedLeeway * 100)}% leeway. Estimate: about ${Math.ceil(progressEstimateMs / 1000)}s.`;
+      return `Computing uptime (tick adjustment ${tickSizeAdj ? 'on' : 'off'}). Estimate: about ${Math.ceil(progressEstimateMs / 1000)}s.`;
     }
 
     return 'Refreshing the current uptime snapshot in the background.';
@@ -175,7 +155,7 @@
       return;
     }
 
-    const nextKey = `${progressLabel}:${slug}:${from}:${to}:${requestedLeeway}`;
+    const nextKey = `${progressLabel}:${slug}:${from}:${to}:${tickSizeAdj}`;
     if (nextKey !== progressKey) {
       progressKey = nextKey;
       progressStartedAt = Date.now();
@@ -202,7 +182,7 @@
     return match ? parseInt(match[1], 10) : Number.POSITIVE_INFINITY;
   }
 
-  const visibleMetricCount = $derived((showBid ? 1 : 0) + (showAsk ? 1 : 0) + 1);
+  const visibleMetricCount = $derived((showBid ? 1 : 0) + (showAsk ? 1 : 0) + (showCombined ? 1 : 0));
   const skeletonColumns = $derived(Math.max(5, 1 + visibleMetricCount * 4));
 
   const tickersByGroup = $derived(
@@ -253,26 +233,23 @@
 
 <div class="mb-4 flex flex-wrap items-center gap-3">
   <div class="flex items-center gap-1.5 text-xs text-zinc-400">
-    <span>bps leeway:</span>
-    <input
-      type="number"
-      min="0"
-      max="50"
-      step="5"
-      bind:value={leewayInput}
-      onkeydown={(e) => e.key === 'Enter' && applyLeeway()}
-      class="mono w-14 rounded border border-zinc-700 bg-zinc-800 px-2 py-1 text-center text-zinc-200 focus:border-violet-500 focus:outline-none"
-    />
-    <span class="text-zinc-500">%</span>
+    <span>Tick size adj:</span>
     <button
-      onclick={applyLeeway}
-      class="rounded bg-violet-500/20 px-2.5 py-1 text-xs font-medium text-violet-400 transition-colors hover:bg-violet-500/30"
-    >Apply</button>
+      onclick={toggleTickAdj}
+      class="rounded px-2.5 py-1 text-xs font-medium transition-colors {tickSizeAdj
+        ? 'bg-violet-500/20 text-violet-400'
+        : 'text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800'}"
+    >{tickSizeAdj ? 'on' : 'off'}</button>
   </div>
 
   <div class="flex items-center gap-1">
     <span class="text-xs text-zinc-500">View:</span>
-    <span class="rounded px-2 py-1 text-xs bg-violet-500/20 text-violet-400">combined</span>
+    <button
+      onclick={() => (showCombined = !showCombined)}
+      class="rounded px-2 py-1 text-xs transition-colors {showCombined
+        ? 'bg-violet-500/20 text-violet-400'
+        : 'text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800'}"
+    >combined</button>
     <button
       onclick={() => (showBid = !showBid)}
       class="rounded px-2 py-1 text-xs transition-colors {showBid
@@ -327,6 +304,9 @@
               <thead>
                 <tr class="border-b border-zinc-800 text-left text-xs text-zinc-500">
                   <th class="pb-2 pl-3 pr-4 pt-3 font-medium">Ticker</th>
+                  {#if tickSizeAdj}
+                    <th class="pb-2 pr-3 pt-3 text-right font-medium">Tick Adj</th>
+                  {/if}
                   {#each allLevels as lvl}
                     <th class="pb-2 pr-2 pt-3 font-medium text-center" colspan={visibleMetricCount}>
                       {lvl.toUpperCase()}
@@ -335,6 +315,9 @@
                 </tr>
                 <tr class="border-b border-zinc-800/50 text-xs text-zinc-600">
                   <th class="pb-1 pl-3 pr-4"></th>
+                  {#if tickSizeAdj}
+                    <th class="pb-1 pr-3"></th>
+                  {/if}
                   {#each allLevels as _}
                     {#if showBid}
                       <th class="pb-1 pr-1 text-right font-normal">bid</th>
@@ -351,18 +334,31 @@
               <tbody>
                 <tr class="border-b border-zinc-800/50 bg-zinc-800/20">
                   <td class="py-2 pl-3 pr-4 text-xs font-semibold uppercase tracking-wide text-zinc-500">Thresholds</td>
+                  {#if tickSizeAdj}
+                    <td class="py-2 pr-3"></td>
+                  {/if}
                   {#each allLevels as lvl}
                     {@const thresh = tickers[0]?.thresholds?.[lvl]}
                     <td class="py-2 pr-2 text-center text-[10px] text-zinc-500" colspan={visibleMetricCount}>
                       {#if thresh}
-                        ${(thresh.usd / 1000).toFixed(0)}k / {thresh.bpsEffective}bps
+                        ${(thresh.usd / 1000).toFixed(0)}k / {thresh.bps}bps
                       {/if}
                     </td>
                   {/each}
                 </tr>
                 {#each tickers as ticker}
+                  {@const tickSpread = ticker.thresholds[ticker.levels[0]]?.tickSpreadBps}
                   <tr class="border-b border-zinc-800/50 hover:bg-zinc-800/30">
                     <td class="py-2 pl-3 pr-4 font-medium text-zinc-200">{ticker.ticker}</td>
+                    {#if tickSizeAdj}
+                      <td class="py-2 pr-3 text-right text-xs text-zinc-400">
+                        {#if tickSpread != null}
+                          {tickSpread.toFixed(2)} bps
+                        {:else}
+                          <span class="text-zinc-700">-</span>
+                        {/if}
+                      </td>
+                    {/if}
                     {#each allLevels as lvl}
                       {@const lkey = lvl.toLowerCase() as 'l1' | 'l2' | 'l3' | 'l4'}
                       {@const levelData = ticker.summary[lkey]}

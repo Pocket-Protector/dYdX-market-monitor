@@ -10,16 +10,15 @@
     subaccounts: number[];
     from: string;
     to: string;
-    bpsLeeway: number;
     bps: number;
     usd: number;
     activeTab: string;
   }
-  const { slug, address, subaccounts, from, to, bpsLeeway, bps, usd, activeTab }: Props = $props();
+  const { slug, address, subaccounts, from, to, bps, usd, activeTab }: Props = $props();
 
   const OPT = { refreshInterval: 0, dedupingInterval: 1_800_000 } as const;
   const summaryKey = $derived(`/api/summary?slug=${slug}&from=${from}&to=${to}`);
-  const uptimeKey = $derived(`/api/uptime/${slug}?from=${from}&to=${to}&bpsLeeway=${bpsLeeway}`);
+  const uptimeKey = $derived(`/api/uptime/${slug}?from=${from}&to=${to}&tickSizeAdj=true`);
   const liquidityKey = $derived(`/api/liquidity-sla?slug=${slug}&from=${from}&to=${to}&bps=${bps}&mode=sla`);
   const depthKey = $derived(`/api/depth-sla?slug=${slug}&from=${from}&to=${to}&usd=${usd}&mode=sla&view=combined`);
 
