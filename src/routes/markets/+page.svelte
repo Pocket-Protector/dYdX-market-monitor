@@ -267,11 +267,6 @@
       {refreshing ? 'Refreshing…' : 'Refresh'}
     </button>
 
-    {#if $data}
-      <span class="ml-auto text-xs text-zinc-500">
-        {filtered.length} / {$data.length} markets
-      </span>
-    {/if}
   </div>
 
   {#if !browser || $isLoading}
@@ -292,49 +287,56 @@
       {#if refreshing}
         <div class="absolute inset-0 z-10 rounded-lg skeleton"></div>
       {/if}
-      <div class="w-fit rounded-lg border border-zinc-800">
-      <table class="min-w-max text-sm">
-        <thead>
-          <tr class="border-b border-zinc-800 bg-zinc-900/60">
-            {#each columns as col}
-              <th
-                class="cursor-pointer select-none whitespace-nowrap px-3 py-2.5 text-xs font-medium text-zinc-500 transition-colors hover:text-zinc-300
-                  {col.align === 'right' ? 'text-right' : 'text-left'}"
-                onclick={() => toggleSort(col.key)}
-              >
-                {col.label}{sortIndicator(col.key)}
-              </th>
-            {/each}
-          </tr>
-        </thead>
-        <tbody>
-          {#each filtered as row (row.clobPairId)}
-            <tr class="border-b border-zinc-800/50 transition-colors hover:bg-zinc-800/30">
-              <td class="whitespace-nowrap px-3 py-2 font-medium text-zinc-200 mono" title={row.ticker}>
-                {shortTicker(row.ticker)}{#if row.ticker.includes(',')}<span class="ml-1 text-[10px] text-zinc-500">*</span>{/if}
-              </td>
-              <td class="px-3 py-2">
-                <span class="inline-block rounded px-1.5 py-0.5 text-[10px] font-medium uppercase {statusBadge(row.status)}">
-                  {row.status === 'FINAL_SETTLEMENT' ? 'Settled' : row.status}
-                </span>
-              </td>
-              <td class="px-3 py-2">
-                <span class="inline-block rounded px-1.5 py-0.5 text-[10px] font-medium {typeBadge(row.marketType)}">
-                  {row.marketType}
-                </span>
-              </td>
-              <td class="whitespace-nowrap px-3 py-2 text-right mono text-zinc-100">{fmtPrice(row.oraclePrice)}</td>
-              <td class="whitespace-nowrap px-3 py-2 text-right mono text-zinc-100">{fmtVol(row.volume24h)}</td>
-              <td class="whitespace-nowrap px-3 py-2 text-right mono text-zinc-100">{fmtVol(row.openInterestNotional)}</td>
-              <td class="whitespace-nowrap px-3 py-2 text-right mono text-zinc-300">{row.trades24h.toLocaleString()}</td>
-              <td class="whitespace-nowrap px-3 py-2 text-right mono {fundingClass(row.nextFundingRate)}">{fmtFunding(row.nextFundingRate)}</td>
-              <td class="whitespace-nowrap px-3 py-2 text-right mono text-zinc-300">{fmtSpread(row.tickSpreadBps)}</td>
-              <td class="whitespace-nowrap px-3 py-2 text-right mono text-zinc-200">{fmtLeverage(row.maxLeverage)}</td>
-              <td class="whitespace-nowrap px-3 py-2 text-right mono text-zinc-300">{fmtStepSize(row)}</td>
-            </tr>
-          {/each}
-        </tbody>
-      </table>
+      <div class="w-fit">
+        <div class="overflow-hidden rounded-lg border border-zinc-800">
+          {#if $data}
+            <div class="border-b border-zinc-800 bg-zinc-900/40 px-3 py-2 text-right text-xs text-zinc-500">
+              {filtered.length} / {$data.length} markets
+            </div>
+          {/if}
+          <table class="min-w-max text-sm">
+            <thead>
+              <tr class="border-b border-zinc-800 bg-zinc-900/60">
+                {#each columns as col}
+                  <th
+                    class="cursor-pointer select-none whitespace-nowrap px-3 py-2.5 text-xs font-medium text-zinc-500 transition-colors hover:text-zinc-300
+                      {col.align === 'right' ? 'text-right' : 'text-left'}"
+                    onclick={() => toggleSort(col.key)}
+                  >
+                    {col.label}{sortIndicator(col.key)}
+                  </th>
+                {/each}
+              </tr>
+            </thead>
+            <tbody>
+              {#each filtered as row (row.clobPairId)}
+                <tr class="border-b border-zinc-800/50 transition-colors hover:bg-zinc-800/30">
+                  <td class="whitespace-nowrap px-3 py-2 font-medium text-zinc-200 mono" title={row.ticker}>
+                    {shortTicker(row.ticker)}{#if row.ticker.includes(',')}<span class="ml-1 text-[10px] text-zinc-500">*</span>{/if}
+                  </td>
+                  <td class="px-3 py-2">
+                    <span class="inline-block rounded px-1.5 py-0.5 text-[10px] font-medium uppercase {statusBadge(row.status)}">
+                      {row.status === 'FINAL_SETTLEMENT' ? 'Settled' : row.status}
+                    </span>
+                  </td>
+                  <td class="px-3 py-2">
+                    <span class="inline-block rounded px-1.5 py-0.5 text-[10px] font-medium {typeBadge(row.marketType)}">
+                      {row.marketType}
+                    </span>
+                  </td>
+                  <td class="whitespace-nowrap px-3 py-2 text-right mono text-zinc-100">{fmtPrice(row.oraclePrice)}</td>
+                  <td class="whitespace-nowrap px-3 py-2 text-right mono text-zinc-100">{fmtVol(row.volume24h)}</td>
+                  <td class="whitespace-nowrap px-3 py-2 text-right mono text-zinc-100">{fmtVol(row.openInterestNotional)}</td>
+                  <td class="whitespace-nowrap px-3 py-2 text-right mono text-zinc-300">{row.trades24h.toLocaleString()}</td>
+                  <td class="whitespace-nowrap px-3 py-2 text-right mono {fundingClass(row.nextFundingRate)}">{fmtFunding(row.nextFundingRate)}</td>
+                  <td class="whitespace-nowrap px-3 py-2 text-right mono text-zinc-300">{fmtSpread(row.tickSpreadBps)}</td>
+                  <td class="whitespace-nowrap px-3 py-2 text-right mono text-zinc-200">{fmtLeverage(row.maxLeverage)}</td>
+                  <td class="whitespace-nowrap px-3 py-2 text-right mono text-zinc-300">{fmtStepSize(row)}</td>
+                </tr>
+              {/each}
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
   {/if}
