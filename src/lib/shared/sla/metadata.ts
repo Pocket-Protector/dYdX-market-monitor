@@ -37,7 +37,13 @@ export async function getSlaMetadata(
   to: string
 ): Promise<SlaMetadataSection[]> {
   return withRequestCache(`sla-metadata:${mmAddress}:${from}:${to}`, 86_400_000, async () => {
-    const uptimeRaw = await apiFetch(`/uptime/${mmAddress}`, { from, to, tickSizeAdj: 'false' });
+    let uptimeRaw: unknown;
+    try {
+      uptimeRaw = await apiFetch(`/uptime/${mmAddress}`, { from, to, tickSizeAdj: 'false' });
+    } catch (e) {
+      if (String(e).includes('API 404')) return [];
+      throw e;
+    }
     const uptimeParsed = UptimeResponseSchema.parse(uptimeRaw);
 
     const draftSections = new Map<string, DraftSection>();

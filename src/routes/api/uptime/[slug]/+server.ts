@@ -18,6 +18,10 @@ export const GET: RequestHandler = async ({ params, url }) => {
     const parsed = UptimeResponseSchema.parse(raw);
     return json({ ...parsed.data, mm: slug });
   } catch (e) {
-    return json({ error: String(e) }, { status: 502 });
+    const msg = String(e);
+    if (msg.includes('API 404')) {
+      return json({ mm: slug, from, to, tickSizeAdj: tickSizeAdj !== 'false', tickers: [] });
+    }
+    return json({ error: msg }, { status: 502 });
   }
 };

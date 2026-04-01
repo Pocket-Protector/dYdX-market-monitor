@@ -114,6 +114,7 @@ export const GET: RequestHandler = async ({ url }) => {
           })),
           tickerLevels: section.tickerLevels
         }));
+        const hasConfiguredSla = resolvedSections.length > 0;
 
         const queryBps = new Map<string, number>();
         for (const section of resolvedSections) {
@@ -175,16 +176,19 @@ export const GET: RequestHandler = async ({ url }) => {
           measuredBps: fallbackBps
         };
 
+        const noSlaSections = !hasConfiguredSla;
         const tickerNeedsFallback = Boolean(ticker) && !groupedTickers.has(ticker);
         const revealedUngrouped = [...allTickers]
           .filter((symbol) => !groupedTickers.has(symbol))
           .sort((a, b) => a.localeCompare(b));
 
-        if (tickerNeedsFallback || revealedUngrouped.length > 0) {
+        if (noSlaSections || tickerNeedsFallback || revealedUngrouped.length > 0) {
           const fallbackRows = await ensureLiquidityRows(fallbackLevel.measuredBps);
-          const ungroupedTickers = tickerNeedsFallback
-            ? [...fallbackRows.keys()].filter((symbol) => symbol === ticker)
-            : revealedUngrouped;
+          const ungroupedTickers = noSlaSections
+            ? [...fallbackRows.keys()].sort((a, b) => a.localeCompare(b))
+            : tickerNeedsFallback
+              ? [...fallbackRows.keys()].filter((symbol) => symbol === ticker)
+              : revealedUngrouped;
 
           if (ungroupedTickers.length > 0) {
             sections.push({
@@ -203,6 +207,7 @@ export const GET: RequestHandler = async ({ url }) => {
         }
 
         return {
+          hasConfiguredSla,
           mode,
           request: {
             bps: fallbackBps,

@@ -6,6 +6,7 @@
   import EmptyState from '$lib/shared/components/EmptyState.svelte';
   import ProgressLoader from '$lib/shared/components/ProgressLoader.svelte';
   import TableSkeleton from '$lib/shared/components/skeletons/TableSkeleton.svelte';
+  import { getMmEmptyStateCopy } from '$lib/shared/mm-activity';
 
   type DepthMode = 'sla' | 'custom';
   type DepthView = 'combined' | 'all';
@@ -47,6 +48,7 @@
   }
 
   interface DepthPayload {
+    hasConfiguredSla: boolean;
     mode: DepthMode;
     request: RequestState;
     view: DepthView;
@@ -63,12 +65,19 @@
     summaries: Record<string, LevelSummary>;
   }
 
+  import type { MmActivity } from '$lib/shared/types';
+
   const {
     slug,
     from,
     to,
-    usd: initialUsd
-  }: { slug: string; from: string; to: string; usd: number } = $props();
+    usd: initialUsd,
+    activity
+  }: { slug: string; from: string; to: string; usd: number; activity?: MmActivity } = $props();
+
+  const emptyState = $derived.by(() =>
+    getMmEmptyStateCopy(activity, { message: 'No depth data for this period.' })
+  );
 
   let draftUsdInput = $state('');
   let draftTicker = $state('');
@@ -141,10 +150,6 @@
   const draftUsd = $derived(parseUsd(draftUsdInput));
   const modeDirty = $derived(draftMode !== appliedMode);
   const tickerDirty = $derived(normalizeTicker(draftTicker) !== appliedTicker);
-  const usdDirty = $derived(draftMode === 'custom' && draftUsd != null && draftUsd !== initialUsd);
-  const invalidDraftUsd = $derived(draftMode === 'custom' && draftUsd == null);
-  const controlsDirty = $derived(modeDirty || tickerDirty || usdDirty);
-  const canApply = $derived(controlsDirty && !invalidDraftUsd);
 
   function setMode(next: DepthMode) {
     draftMode = next;
@@ -205,6 +210,12 @@
     () => depthKey,
     { refreshInterval: 60_000, dedupingInterval: 1_800_000 }
   );
+  const hasConfiguredSla = $derived($data?.hasConfiguredSla ?? true);
+  const amountInputEnabled = $derived(!hasConfiguredSla || draftMode === 'custom');
+  const usdDirty = $derived(amountInputEnabled && draftUsd != null && draftUsd !== initialUsd);
+  const invalidDraftUsd = $derived(amountInputEnabled && draftUsd == null);
+  const controlsDirty = $derived(modeDirty || tickerDirty || usdDirty);
+  const canApply = $derived(controlsDirty && !invalidDraftUsd);
 
   const hasMatchingPayload = $derived.by(() => {
     if (!$data) return false;
@@ -418,7 +429,9 @@
     shows the bid, ask, and combined fill bps for that amount.
   </div>
   <div class="leading-relaxed">
-    {#if appliedMode === 'custom'}
+    {#if !hasConfiguredSla}
+      No SLA configuration is available for this market maker. Use the amount control below to inspect fallback depth targets at <span class="mono text-zinc-300">{fmtTargetUsd(initialUsd)}</span>.
+    {:else if appliedMode === 'custom'}
       Custom mode is on: each level keeps its SLA target, but the fill bps below are measured for
       <span class="mono text-zinc-300">{fmtTargetUsd(initialUsd)}</span>.
     {:else}
@@ -452,30 +465,32 @@
 </div>
 
 <div class="mb-4 flex flex-wrap items-center gap-x-6 gap-y-2">
-  <div class="flex items-center gap-1">
-    <span class="text-xs text-zinc-500">Size:</span>
-    <button
-      type="button"
-      onclick={() => setMode('sla')}
-      class="rounded px-2 py-1 text-xs transition-colors {draftMode === 'sla'
-        ? 'bg-violet-500/20 text-violet-400'
-        : 'text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800'}"
-    >SLA size</button>
-    <button
-      type="button"
-      onclick={() => setMode('custom')}
-      class="rounded px-2 py-1 text-xs transition-colors {draftMode === 'custom'
-        ? 'bg-violet-500/20 text-violet-400'
-        : 'text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800'}"
-    >Custom size</button>
-  </div>
+  {#if hasConfiguredSla}
+    <div class="flex items-center gap-1">
+      <span class="text-xs text-zinc-500">Size:</span>
+      <button
+        type="button"
+        onclick={() => setMode('sla')}
+        class="rounded px-2 py-1 text-xs transition-colors {draftMode === 'sla'
+          ? 'bg-violet-500/20 text-violet-400'
+          : 'text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800'}"
+      >SLA size</button>
+      <button
+        type="button"
+        onclick={() => setMode('custom')}
+        class="rounded px-2 py-1 text-xs transition-colors {draftMode === 'custom'
+          ? 'bg-violet-500/20 text-violet-400'
+          : 'text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800'}"
+      >Custom size</button>
+    </div>
+  {/if}
 
   <label class="flex items-center gap-2 text-xs text-zinc-400">
     amount
     <input
       type="text"
       bind:value={draftUsdInput}
-      disabled={draftMode !== 'custom'}
+      disabled={!amountInputEnabled}
       onkeydown={onControlKeydown}
       class="w-24 rounded border border-zinc-700 bg-zinc-900 px-2 py-1 text-xs text-zinc-200 focus:border-violet-500 focus:outline-none mono disabled:cursor-not-allowed disabled:border-zinc-800 disabled:text-zinc-600"
     />
@@ -544,7 +559,7 @@
     <TableSkeleton rows={8} columns={skeletonColumns} />
   </div>
 {:else if displaySections.length === 0}
-  <EmptyState message="No depth data for this period." />
+  <EmptyState message={emptyState.message} hint={emptyState.hint} />
 {:else}
   {#if $depthError}
     <div class="mb-3">

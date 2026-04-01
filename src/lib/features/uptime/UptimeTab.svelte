@@ -6,7 +6,9 @@
   import EmptyState from '$lib/shared/components/EmptyState.svelte';
   import ProgressLoader from '$lib/shared/components/ProgressLoader.svelte';
   import TableSkeleton from '$lib/shared/components/skeletons/TableSkeleton.svelte';
+  import { getMmEmptyStateCopy } from '$lib/shared/mm-activity';
   import type { UptimeTicker } from '$lib/shared/sla/types';
+  import type { MmActivity } from '$lib/shared/types';
 
   interface UptimePayload {
     mm: string;
@@ -19,8 +21,13 @@
   const {
     slug,
     from,
-    to
-  }: { slug: string; from: string; to: string } = $props();
+    to,
+    activity
+  }: { slug: string; from: string; to: string; activity?: MmActivity } = $props();
+
+  const emptyState = $derived.by(() =>
+    getMmEmptyStateCopy(activity, { message: 'No uptime data available.' })
+  );
 
   let showBid = $state(false);
   let showAsk = $state(false);
@@ -279,9 +286,9 @@
     <TableSkeleton rows={8} columns={skeletonColumns} />
   </div>
 {:else if !freshData}
-  <EmptyState message="No uptime data available." />
+  <EmptyState message={emptyState.message} hint={emptyState.hint} />
 {:else if freshData.tickers.length === 0}
-  <EmptyState message="No tickers in SLA for this period." hint="Check that SLA configuration is set for this market maker." />
+  <EmptyState message="No SLA configured for this market maker." hint="Uptime tracking requires an SLA contract to be set up." />
 {:else}
   <div class="relative space-y-4">
     {#each tickersByGroup as { group, tickers }}

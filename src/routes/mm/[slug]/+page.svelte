@@ -13,6 +13,8 @@
   import DepthTab from '$lib/features/depth/DepthTab.svelte';
   import FillsTab from '$lib/features/fills/FillsTab.svelte';
   import TabPrefetcher from '$lib/components/mm/TabPrefetcher.svelte';
+  import { fetchMmActivity } from '$lib/shared/mm-activity';
+  import type { MmActivity } from '$lib/shared/types';
   import type { PageData } from './$types';
 
   const { data }: { data: PageData } = $props();
@@ -35,10 +37,62 @@
     updateParams({ tab });
   }
 
+  let activity = $state<MmActivity>({
+    lastFillAt: null,
+    lastMakerFillAt: null,
+    lastFillInRangeAt: null,
+    lastMakerFillInRangeAt: null,
+    makerVolumeInRange: 0,
+    makerTickerCountInRange: 0,
+    loading: true
+  });
+
+  $effect(() => {
+    if (!browser) return;
+
+    const address = data.mm.address;
+    const subs = data.mm.subaccounts;
+    const controller = new AbortController();
+    let cancelled = false;
+    activity = {
+      lastFillAt: null,
+      lastMakerFillAt: null,
+      lastFillInRangeAt: null,
+      lastMakerFillInRangeAt: null,
+      makerVolumeInRange: 0,
+      makerTickerCountInRange: 0,
+      loading: true
+    };
+
+    fetchMmActivity(address, subs, data.from, data.to, controller.signal)
+      .then((nextActivity) => {
+        if (cancelled) return;
+        activity = nextActivity;
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        if (error instanceof DOMException && error.name === 'AbortError') return;
+        activity = {
+          lastFillAt: null,
+          lastMakerFillAt: null,
+          lastFillInRangeAt: null,
+          lastMakerFillInRangeAt: null,
+          makerVolumeInRange: 0,
+          makerTickerCountInRange: 0,
+          loading: false
+        };
+      });
+
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
+  });
+
 </script>
 
 <PageShell>
-  <MmHeader address={data.mm.address} from={data.from} to={data.to} />
+  <MmHeader address={data.mm.address} from={data.from} to={data.to} {activity} />
 
   <div class="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
     <nav class="flex gap-1">
@@ -76,13 +130,13 @@
         to={data.to}
       />
     {:else if activeTab === 'summary'}
-      <SummaryTab slug={data.mm.slug} from={data.from} to={data.to} />
+      <SummaryTab slug={data.mm.slug} from={data.from} to={data.to} {activity} />
     {:else if activeTab === 'uptime'}
-      <UptimeTab slug={data.mm.slug} from={data.from} to={data.to} />
+      <UptimeTab slug={data.mm.slug} from={data.from} to={data.to} {activity} />
     {:else if activeTab === 'liquidity'}
-      <LiquidityTab slug={data.mm.slug} from={data.from} to={data.to} {bps} />
+      <LiquidityTab slug={data.mm.slug} from={data.from} to={data.to} {bps} {activity} />
     {:else if activeTab === 'depth'}
-      <DepthTab slug={data.mm.slug} from={data.from} to={data.to} {usd} />
+      <DepthTab slug={data.mm.slug} from={data.from} to={data.to} {usd} {activity} />
     {/if}
   </div>
 

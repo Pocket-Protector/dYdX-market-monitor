@@ -8,10 +8,19 @@
   import BpsCell from '$lib/shared/components/BpsCell.svelte';
   import UsdCell from '$lib/shared/components/UsdCell.svelte';
   import TableSkeleton from '$lib/shared/components/skeletons/TableSkeleton.svelte';
+  import { getMmEmptyStateCopy } from '$lib/shared/mm-activity';
   import type { SummaryRow } from './types';
   import type { UptimeTicker } from '$lib/shared/sla/types';
+  import type { MmActivity } from '$lib/shared/types';
 
-  const { slug, from, to }: { slug: string; from: string; to: string } = $props();
+  const { slug, from, to, activity }: { slug: string; from: string; to: string; activity?: MmActivity } = $props();
+
+  const activityEmptyState = $derived.by(() =>
+    getMmEmptyStateCopy(activity, {
+      message: 'No data for this period.',
+      hint: 'Try adjusting the time range or filters.'
+    })
+  );
 
   let ticker = $state($page.url.searchParams.get('ticker') ?? '');
   let collapsedGroups = $state<Record<string, boolean>>({});
@@ -99,8 +108,7 @@
 
   const hasGroups = $derived(tickerGroupMap.size > 0);
   const groupEnabled = $derived(($page.url.searchParams.get('summaryGroup') ?? 'sla') === 'sla');
-  const canEnableGrouping = $derived($uptimeLoading || hasGroups);
-  const groupToggleDisabled = $derived(!groupEnabled && !canEnableGrouping);
+  const groupToggleDisabled = $derived($uptimeLoading ? false : !hasGroups);
 
   function toggleGrouping() {
     updateParams({ summaryGroup: groupEnabled ? 'none' : 'sla' });
@@ -141,6 +149,16 @@
       return true;
     });
   });
+
+  const noFilterMatches = $derived(Boolean($data && $data.rows.length > 0 && filteredSorted.length === 0));
+  const emptyState = $derived.by(() =>
+    noFilterMatches
+      ? {
+          message: 'No tickers match the current filters.',
+          hint: 'Try clearing the ticker or numeric filters.'
+        }
+      : activityEmptyState
+  );
 
   function groupRank(group: string): number {
     const match = group.match(/group\s*(\d+)/i);
@@ -320,7 +338,7 @@
 {:else if $isLoading && sorted.length === 0}
   <TableSkeleton rows={8} columns={6} />
 {:else if filteredSorted.length === 0}
-  <EmptyState />
+  <EmptyState message={emptyState.message} hint={emptyState.hint} />
 {:else}
   <div class="relative">
     {#if groupedSections}
