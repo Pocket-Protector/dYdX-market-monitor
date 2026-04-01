@@ -137,8 +137,7 @@ src/
       params.ts                # updateParams — URL search param helper
       request-cache.ts         # In-memory server-side request deduplication
 
-mm-config.json               # MM address + subaccount config
-mm-config.example.json       # Copy of above, committed for reference
+mm-config.json               # MM address + subaccount config (committed, names kept anonymous)
 ```
 
 ### Dependency Rules
@@ -379,20 +378,24 @@ returned. Filter `market` client-side if needed.
 
 ## 6. MM Config Reference
 
-**File:** `mm-config.json` (gitignored in production; `mm-config.example.json` committed)
+**File:** `mm-config.json` — committed to the public repo. Names must stay anonymous —
+use generic slugs like `mm-01`, `mm-02`, etc. Never put real firm names here. The real
+slug → firm name mapping is maintained privately outside the repo (e.g. a private
+spreadsheet). The slugs `mm1`, `mm2`, `mm3` are locked for backwards compatibility
+and must not be renamed. New entries use the `mm-NN` format (e.g. `mm-04`).
 
 ```json
 [
   {
     "slug": "mm1",
-    "name": "MM1 S1",
+    "name": "MM1",
     "address": "dydx1javmgpng0a2dpdpmnqpt0qxw67laaay26yymnp",
     "subaccounts": [1, 2]
   },
   {
-    "slug": "mm3",
-    "name": "MM3",
-    "address": "dydx10hpl83hamwz0pxvjlanh5rcas3mdgf8xk7g7ra",
+    "slug": "mm-04",
+    "name": "MM-04",
+    "address": "dydx1q869gyjwanxhw5xdgfg67pg3y8gjeuzth6u6zl",
     "subaccounts": [0]
   }
 ]

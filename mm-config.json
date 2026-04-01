@@ -1,5 +1,22 @@
 [
-  { "slug": "mm1", "name": "MM1 S1", "address": "dydx1javmgpng0a2dpdpmnqpt0qxw67laaay26yymnp", "subaccounts": [1, 2] },
-  { "slug": "mm3", "name": "MM3", "address": "dydx10hpl83hamwz0pxvjlanh5rcas3mdgf8xk7g7ra", "subaccounts": [0] },
-  { "slug": "mm2", "name": "MM2", "address": "dydx1vm2yw07sptmmgum60rvp7ku202j55gkh86k4vv", "subaccounts": [0] }
+  { "slug": "mm-01", "name": "MM-01", "address": "dydx14dltc2w6y3dhf0naz8luglsvjt0vhvswm2j6d0", "subaccounts": [0] },
+  { "slug": "mm-02", "name": "MM-02", "address": "dydx1dax7t2529z8996579zuqdatv62wpsw89lv3apc",  "subaccounts": [0] },
+  { "slug": "mm-03", "name": "MM-03", "address": "dydx1g6vlujs2fw7c4886uc8g092474d54uhcf2swrg",  "subaccounts": [0, 2] },
+  { "slug": "mm-04", "name": "MM-04", "address": "dydx1q869gyjwanxhw5xdgfg67pg3y8gjeuzth6u6zl", "subaccounts": [0] },
+  { "slug": "mm-05", "name": "MM-05", "address": "dydx15u3dtsf4twdxttvy7850dkex7tcf3ps2y8wcuf", "subaccounts": [0] },
+  { "slug": "mm-06", "name": "MM-06", "address": "dydx1d06lgyy03spureacp933g3qc3wwuszaxjurk5w", "subaccounts": [0] },
+  { "slug": "mm-07", "name": "MM-07", "address": "dydx1zs7rw5gztsqq4648fqqe0l4pg580lm66m0qdpw", "subaccounts": [0] },
+  { "slug": "mm1",   "name": "MM1",   "address": "dydx1javmgpng0a2dpdpmnqpt0qxw67laaay26yymnp", "subaccounts": [1, 2] },
+  { "slug": "mm3",   "name": "MM3",   "address": "dydx10hpl83hamwz0pxvjlanh5rcas3mdgf8xk7g7ra", "subaccounts": [0] },
+  { "slug": "mm-10", "name": "MM-10", "address": "dydx1ensqm4lyl5vg6mrj7uwpvrggjmw2wd8rnwu40c", "subaccounts": [0, 1] },
+  { "slug": "mm-11", "name": "MM-11", "address": "dydx1h5gmd0qzwrdds5ymck3685jn89ptjun8550dwp", "subaccounts": [0] },
+  { "slug": "mm-12", "name": "MM-12", "address": "dydx1kakd9gnzws6sgazfew94yf4n0x2uhupsg7dn67", "subaccounts": [0, 1] },
+  { "slug": "mm-13", "name": "MM-13", "address": "dydx1c8fd59zw0e79m7p5skne5xvcna9cs59mxmprnr", "subaccounts": [0] },
+  { "slug": "mm-14", "name": "MM-14", "address": "dydx15m3lvgfwe4xad7wqyskvn6qz5w5ahue60hhemn", "subaccounts": [0, 1, 2, 3, 4] },
+  { "slug": "mm-15", "name": "MM-15", "address": "dydx15s4h8z5sxlw390ka3j6y9annvhpkk4q68kle7a", "subaccounts": [0] },
+  { "slug": "mm-16", "name": "MM-16", "address": "dydx1x4g2qxj25t4ah9p8uudu5zc44vu538szx47cam", "subaccounts": [0] },
+  { "slug": "mm-17", "name": "MM-17", "address": "dydx1t29w9d9y58wsy6ua7ht0fj6yf36af3hz6hmxqm", "subaccounts": [0] },
+  { "slug": "mm-18", "name": "MM-18", "address": "dydx1htq9f27qmm8c5umn4vf9jsddum9v0n7e9x4llr", "subaccounts": [0] },
+  { "slug": "mm-19", "name": "MM-19", "address": "dydx1z4mt7c4q0drw5lwfywejhxkmx3ftfnh6dexjzd", "subaccounts": [0] },
+  { "slug": "mm2",   "name": "MM2",   "address": "dydx1vm2yw07sptmmgum60rvp7ku202j55gkh86k4vv", "subaccounts": [0] }
 ]
