@@ -7,7 +7,7 @@
   const comingSoonTooltip = 'Coming soon. Only the current 24h range is enabled right now.';
 
   const presets: { label: string; value: Preset; enabled: boolean }[] = [
-    { label: '24h', value: '24h', enabled: true },
+    { label: 'Today', value: '24h', enabled: true },
     { label: '7d', value: '7d', enabled: false },
     { label: '30d', value: '30d', enabled: false }
   ];
@@ -20,7 +20,7 @@
 
   function isActive(preset: Preset): boolean {
     const range = presetToFromTo(preset);
-    return range.from === from && range.to === to;
+    return range.from === from && range.to.slice(0, 10) === to.slice(0, 10);
   }
 
   function getPresetTooltip(preset: { value: Preset; enabled: boolean }): string | undefined {
@@ -28,7 +28,7 @@
     if (preset.value !== '24h') return undefined;
 
     const range = presetToFromTo('24h');
-    return `24h uses the calendar-date span ${range.from} to ${range.to}, not a rolling last 24 hours.`;
+    return `Shows data from midnight ${range.from} up to right now.`;
   }
 </script>
 
@@ -60,7 +60,7 @@
     <span class="text-zinc-600">-></span>
     <input
       type="date"
-      value={to}
+      value={to.slice(0, 10)}
       disabled
       class="cursor-not-allowed rounded border border-zinc-800 bg-zinc-900/50 px-2 py-1 text-xs text-zinc-500"
     />
