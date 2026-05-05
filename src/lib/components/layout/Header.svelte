@@ -3,6 +3,7 @@
 
   const onMm = $derived($page.url.pathname.startsWith('/mm'));
   const onMarkets = $derived($page.url.pathname.startsWith('/markets'));
+  const onMarkout = $derived($page.url.pathname.startsWith('/markoutPnL'));
 </script>
 
 <header class="sticky top-0 z-30 border-b border-zinc-800 bg-zinc-950/95 backdrop-blur-sm">
@@ -32,6 +33,18 @@
       >
         MM Performance
         {#if onMm}
+          <span class="absolute bottom-0 left-3 right-3 h-[2px] rounded-t-full bg-violet-500"></span>
+        {/if}
+      </a>
+      <a
+        href="/markoutPnL"
+        data-sveltekit-preload-data="hover"
+        class="relative flex items-center px-3 text-[13px] transition-colors {onMarkout
+          ? 'text-zinc-100'
+          : 'text-zinc-500 hover:text-zinc-300'}"
+      >
+        Markout PnL
+        {#if onMarkout}
           <span class="absolute bottom-0 left-3 right-3 h-[2px] rounded-t-full bg-violet-500"></span>
         {/if}
       </a>

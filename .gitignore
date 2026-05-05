@@ -25,4 +25,4 @@ vite.config.ts.timestamp-*
 # Claude
 .claude
 .playwright-mcp
-/docs/superpowers
+/docs
