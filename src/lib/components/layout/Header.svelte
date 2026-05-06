@@ -1,7 +1,6 @@
 <script lang="ts">
   import { page } from '$app/stores';
 
-  const onMm = $derived($page.url.pathname.startsWith('/mm'));
   const onMarkets = $derived($page.url.pathname.startsWith('/markets'));
   const onMarkout = $derived($page.url.pathname.startsWith('/markoutPnL'));
 </script>
@@ -24,18 +23,9 @@
 
     <!-- Nav -->
     <nav class="flex items-stretch gap-0.5">
-      <a
-        href="/mm"
-        data-sveltekit-preload-data="hover"
-        class="relative flex items-center px-3 text-[13px] transition-colors {onMm
-          ? 'text-zinc-100'
-          : 'text-zinc-500 hover:text-zinc-300'}"
-      >
+      <span class="relative flex cursor-not-allowed items-center px-3 text-[13px] text-zinc-600 opacity-50 select-none">
         MM Performance
-        {#if onMm}
-          <span class="absolute bottom-0 left-3 right-3 h-[2px] rounded-t-full bg-violet-500"></span>
-        {/if}
-      </a>
+      </span>
       <a
         href="/markoutPnL"
         data-sveltekit-preload-data="hover"
