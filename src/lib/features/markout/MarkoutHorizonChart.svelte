@@ -22,7 +22,7 @@
     points: { horizon: MarkoutHorizon; value: number }[];
   }
 
-  const { series }: { series: ChartSeries[] } = $props();
+  let { series }: { series: ChartSeries[] } = $props();
 
   let canvas = $state<HTMLCanvasElement | undefined>();
   let chart: Chart | null = null;

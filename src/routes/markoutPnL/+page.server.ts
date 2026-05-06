@@ -1,11 +1,9 @@
 import type { PageServerLoad } from './$types';
 import { apiFetch } from '$lib/api/client';
 import {
-  DEFAULT_MARKOUT_HORIZON,
-  isValidMarkoutHorizon,
   isValidMarkoutView,
-  type MarkoutHorizon,
   type MarkoutMeta,
+  type MarkoutOverviewResponse,
   type MarkoutView
 } from '$lib/features/markout/types';
 
@@ -27,16 +25,23 @@ export const load: PageServerLoad = async ({ url }) => {
   const meta = raw.data;
 
   const viewParam = url.searchParams.get('view');
-  const horizonParam = url.searchParams.get('horizon');
   const view: MarkoutView = isValidMarkoutView(viewParam) ? viewParam : 'dydx';
-  const horizon: MarkoutHorizon = isValidMarkoutHorizon(horizonParam)
-    ? horizonParam
-    : (meta.defaultHorizon ?? DEFAULT_MARKOUT_HORIZON);
 
   const { minDate, maxDate } = meta.availability[view];
   const defaultFrom = clampDate(subDays(maxDate, 7), minDate, maxDate);
   const tableFrom = clampDate(url.searchParams.get('tableFrom') ?? defaultFrom, minDate, maxDate);
   const tableTo = clampDate(url.searchParams.get('tableTo') ?? maxDate, minDate, maxDate);
+  const overviewRaw = (await apiFetch('/api/markout/overview', {
+    view,
+    from: tableFrom,
+    to: tableTo
+  })) as { data: MarkoutOverviewResponse };
 
-  return { meta, view, horizon, tableFrom, tableTo };
+  return {
+    meta,
+    view,
+    tableFrom,
+    tableTo,
+    initialOverview: overviewRaw.data
+  };
 };

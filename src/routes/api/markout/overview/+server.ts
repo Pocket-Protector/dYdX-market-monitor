@@ -10,5 +10,15 @@ export const GET: RequestHandler = async ({ url, fetch }) => {
   if (!res.ok) throw error(res.status);
   const body = await res.json();
   if (body.error) throw error(400, body.error);
-  return json(MarkoutOverviewResponseSchema.parse(body.data));
+  const parsed = MarkoutOverviewResponseSchema.parse(body.data);
+  const fromParam = url.searchParams.get('from');
+  const toParam = url.searchParams.get('to');
+  return json({
+    ...parsed,
+    range: {
+      ...parsed.range,
+      requestedFrom: parsed.range.requestedFrom ?? fromParam,
+      requestedTo: parsed.range.requestedTo ?? toParam
+    }
+  });
 };

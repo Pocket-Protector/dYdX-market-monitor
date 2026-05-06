@@ -1,3 +1,4 @@
+
 <script lang="ts">
   import { updateParams } from '$lib/utils/params';
 
@@ -8,6 +9,7 @@
     max,
     paramFromKey = 'from',
     paramToKey = 'to',
+    clearOnApply = [] as string[],
     label = 'Time duration',
     summary = `${from} to ${to}`,
     helperText = 'This calendar range updates the current view only.'
@@ -18,6 +20,7 @@
     max: string;
     paramFromKey?: string;
     paramToKey?: string;
+    clearOnApply?: string[];
     label?: string;
     summary?: string;
     helperText?: string;
@@ -36,7 +39,9 @@
     if (!draftFrom || !draftTo) return;
     const nextFrom = draftFrom <= draftTo ? draftFrom : draftTo;
     const nextTo = draftTo >= draftFrom ? draftTo : draftFrom;
-    updateParams({ [paramFromKey]: nextFrom, [paramToKey]: nextTo });
+    const patch: Record<string, string | null> = { [paramFromKey]: nextFrom, [paramToKey]: nextTo };
+    for (const key of clearOnApply) patch[key] = null;
+    updateParams(patch);
     isOpen = false;
   }
 </script>

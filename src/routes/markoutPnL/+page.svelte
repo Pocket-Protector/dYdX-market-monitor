@@ -1,82 +1,28 @@
 <script lang="ts">
-  import { useSWR } from 'sswr';
-  import { page } from '$app/stores';
   import PageShell from '$lib/components/layout/PageShell.svelte';
-  import MarkoutInfoCard from '$lib/features/markout/MarkoutInfoCard.svelte';
   import MarkoutRangeSelector from '$lib/features/markout/MarkoutRangeSelector.svelte';
   import MarkoutViewToggle from '$lib/features/markout/MarkoutViewToggle.svelte';
-  import MarkoutTimeSeriesChart from '$lib/features/markout/MarkoutTimeSeriesChart.svelte';
   import MarkoutHorizonChart from '$lib/features/markout/MarkoutHorizonChart.svelte';
   import { buildMarkoutGlobalCsv, buildMarkoutGlobalCsvFilename } from '$lib/features/markout/export.js';
   import {
     MARKOUT_HORIZONS,
     colorForSlug,
-    isValidMarkoutHorizon,
-    isValidMarkoutView,
-    type MarkoutHorizon,
-    type MarkoutOverviewResponse,
-    type MarkoutSeriesResponse,
     type MarkoutView
   } from '$lib/features/markout/types';
-  import { updateParams } from '$lib/utils/params';
   import { formatPct, formatUsd } from '$lib/utils/format';
-  import TableSkeleton from '$lib/shared/components/skeletons/TableSkeleton.svelte';
-  import ChartSkeleton from '$lib/shared/components/skeletons/ChartSkeleton.svelte';
-  import ErrorBanner from '$lib/shared/components/ErrorBanner.svelte';
   import type { PageData } from './$types';
 
-  const { data }: { data: PageData } = $props();
+  let { data }: { data: PageData } = $props();
 
-  // --- URL-backed state ---
-  const view = $derived<MarkoutView>(
-    isValidMarkoutView($page.url.searchParams.get('view'))
-      ? ($page.url.searchParams.get('view') as MarkoutView)
-      : 'dydx'
-  );
-  const horizon = $derived<MarkoutHorizon>(
-    isValidMarkoutHorizon($page.url.searchParams.get('horizon'))
-      ? ($page.url.searchParams.get('horizon') as MarkoutHorizon)
-      : data.meta.defaultHorizon
-  );
-  const tableFrom = $derived($page.url.searchParams.get('tableFrom') ?? data.tableFrom);
-  const tableTo = $derived($page.url.searchParams.get('tableTo') ?? data.tableTo);
+  const view = $derived<MarkoutView>(data.view);
+  const tableFrom = $derived(data.tableFrom);
+  const tableTo = $derived(data.tableTo);
 
-  // --- sswr ---
-  const seriesKey = $derived(`/api/markout/series?view=${view}&horizon=${horizon}`);
-  const { data: seriesData, isLoading: seriesLoading, error: seriesError } =
-    useSWR<MarkoutSeriesResponse>(() => seriesKey, {
-      refreshInterval: 300_000,
-      dedupingInterval: 3_600_000
-    });
-
-  const overviewKey = $derived(`/api/markout/overview?view=${view}&from=${tableFrom}&to=${tableTo}`);
-  const { data: overviewData, isLoading: overviewLoading, error: overviewError } =
-    useSWR<MarkoutOverviewResponse>(() => overviewKey, {
-      refreshInterval: 300_000,
-      dedupingInterval: 1_800_000
-    });
-
-  // --- freshness ---
-  const overviewFresh = $derived(
-    Boolean(
-      $overviewData &&
-        $overviewData.view === view &&
-        $overviewData.range.requestedFrom === tableFrom &&
-        $overviewData.range.requestedTo === tableTo
-    )
-  );
-  const showOverviewSkeleton = $derived(!overviewFresh && !$overviewError);
-
-  // --- derived data ---
   const coloredRows = $derived(
-    (overviewFresh ? $overviewData!.rows : []).map((row) => ({
+    data.initialOverview.rows.map((row) => ({
       ...row,
       color: colorForSlug(row.slug)
     }))
-  );
-
-  const coloredSeries = $derived(
-    ($seriesData?.series ?? []).map((s) => ({ ...s, color: colorForSlug(s.key) }))
   );
 
   const horizonChartSeries = $derived(
@@ -88,7 +34,6 @@
     }))
   );
 
-  // --- sort ---
   type SortCol =
     | 'name'
     | 'fills'
@@ -134,40 +79,58 @@
     return sortDir === 'asc' ? '↑' : '↓';
   }
 
-  // --- summary cards ---
-  const topRow = $derived(sortedRows[0]);
-  const bestFiveSecond = $derived(
-    [...coloredRows]
-      .filter((r) => r.horizons['5s'] !== null)
-      .sort((a, b) => (b.horizons['5s'] ?? 0) - (a.horizons['5s'] ?? 0))[0]
-  );
-  const detailCount = $derived(coloredRows.filter((r) => r.hasDetail).length);
+  function parseDateOnlyUtc(value: string): number {
+    const [year, month, day] = value.split('-').map(Number);
+    return Date.UTC(year, month - 1, day);
+  }
+
   const tableViewLabel = $derived(view === 'dydx' ? 'dYdX Mid' : 'Index Mids');
-
-  const effectiveRange = $derived(
-    overviewFresh
-      ? `${$overviewData!.range.effectiveFrom} – ${$overviewData!.range.effectiveTo}`
-      : `${tableFrom} – ${tableTo}`
-  );
-
-  // --- info card content ---
-  const introLines = [
-    'All markout PnL is computed on maker fills only.',
-    'For each fill, the dashboard tracks mid prices at 2s, 3s, 5s, 10s, 20s, 30s, 60s, and 300s.',
-    'BUY fill PnL uses mid minus execution price; SELL fill PnL uses execution price minus mid.'
-  ];
-
-  const tableLines = [
-    'dYdX Mid measures performance against dYdX v4 internal orderbook mids at fill time.',
-    'Index Mids measures the same fills against the simple average of Binance, Bybit, and OKX mids.',
-    'Total volume is exchange-agnostic and includes maker plus taker volume even though markout uses maker fills only.'
-  ];
-
-  // --- meta bounds for date picker ---
+  const tableDays = $derived.by(() => {
+    if (!tableFrom || !tableTo) return null;
+    const start = parseDateOnlyUtc(tableFrom);
+    const end = parseDateOnlyUtc(tableTo);
+    return Math.floor((end - start) / 86_400_000) + 1;
+  });
   const minDate = $derived(data.meta.availability[view].minDate);
   const maxDate = $derived(data.meta.availability[view].maxDate);
 
-  // --- CSV download ---
+  const measurementRows = [
+    {
+      label: 'Maker fills only',
+      value: 'Markout PnL excludes taker fills.'
+    },
+    {
+      label: 'Mid checks',
+      value:
+        'After each fill, the dashboard looks up the mid price at each horizon and rolls the result into cumulative PnL.'
+    },
+    {
+      label: 'Table columns',
+      value:
+        'Total Volume includes maker plus taker volume.'
+    },
+    {
+      label: 'View difference',
+      value:
+        "dYdX Mid uses dYdX's own orderbook mid. Index Mids uses the average mid from Binance, Bybit, and OKX."
+    }
+  ];
+
+  const availabilityRows = [
+    {
+      label: 'dYdX Mid',
+      value: '5s to 300s starts on 2026-04-08'
+    },
+    {
+      label: 'dYdX Mid',
+      value: '2s and 3s start on 2026-04-24'
+    },
+    {
+      label: 'Index Mids',
+      value: 'All horizons start on 2026-04-24'
+    }
+  ];
+
   function downloadGlobalTableCsv() {
     const csv = buildMarkoutGlobalCsv(sortedRows, view);
     const filename = buildMarkoutGlobalCsvFilename(view);
@@ -186,117 +149,84 @@
     <div>
       <h1 class="text-2xl font-semibold text-zinc-100">Markout PnL</h1>
       <p class="mt-1 max-w-3xl text-sm text-zinc-400">
-        Compare market makers across cumulative markout, horizon curves, and per-MM drilldowns. The
-        active view controls both the chart and the table.
+        Compare market makers in the global table, then drill down into per-MM markout detail. The
+        active view controls the table and horizon curve.
       </p>
-      {#if data.meta.lastUpdatedAt}
-        <span class="mt-1 block text-xs text-zinc-500">
-          Data through {data.meta.lastUpdatedAt.slice(0, 10)}
-        </span>
-      {/if}
     </div>
     <MarkoutViewToggle view={view} />
   </div>
 
-  <div class="grid gap-4 lg:grid-cols-[1.55fr_1fr]">
-    <MarkoutInfoCard title="How Markout Works" lines={introLines} />
-  </div>
-
-  <div class="mt-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-    <div class="rounded-xl border border-zinc-800 bg-zinc-900/60 p-4">
-      <div class="text-[11px] uppercase tracking-wide text-zinc-500">View</div>
-      <div class="mt-1 text-lg font-semibold text-zinc-100">
-        {view === 'dydx' ? 'dYdX Mid' : 'Index Mids'}
-      </div>
-    </div>
-    <div class="rounded-xl border border-zinc-800 bg-zinc-900/60 p-4">
-      <div class="text-[11px] uppercase tracking-wide text-zinc-500">MMs tracked</div>
-      <div class="mt-1 text-lg font-semibold text-zinc-100">
-        {overviewFresh ? coloredRows.length : '—'}
-      </div>
-    </div>
-    <div class="rounded-xl border border-zinc-800 bg-zinc-900/60 p-4">
-      <div class="text-[11px] uppercase tracking-wide text-zinc-500">Best 5s markout</div>
-      <div class="mt-1 text-lg font-semibold text-emerald-300">
-        {bestFiveSecond
-          ? `${bestFiveSecond.name} · ${formatUsd(bestFiveSecond.horizons['5s'] ?? 0)}`
-          : '—'}
-      </div>
-    </div>
-    <div class="rounded-xl border border-zinc-800 bg-zinc-900/60 p-4">
-      <div class="text-[11px] uppercase tracking-wide text-zinc-500">MMs with detail</div>
-      <div class="mt-1 text-lg font-semibold text-zinc-100">
-        {overviewFresh ? detailCount : '—'}
-      </div>
-    </div>
-  </div>
-
-  <section class="mt-6">
-    <div class="mb-3 flex flex-wrap items-center justify-between gap-3">
+  <details class="mt-6 overflow-hidden rounded-xl border border-zinc-800 bg-zinc-900/75" open={false}>
+    <summary class="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 marker:hidden sm:px-5">
       <div>
-        <div class="flex flex-wrap items-center gap-3">
-          <h2 class="text-lg font-semibold text-zinc-100">Cumulative markout to date</h2>
-          <label class="flex items-center gap-2 text-lg font-semibold text-zinc-100">
-            <span class="sr-only">Horizon</span>
-            <span class="text-zinc-500">at</span>
-            <div class="relative">
-              <select
-                class="appearance-none rounded-full border border-zinc-700 bg-zinc-950 px-4 py-1.5 pr-10 text-lg font-semibold text-zinc-100 outline-none transition-colors hover:border-zinc-500 focus:border-zinc-400"
-                value={horizon}
-                onchange={(e) =>
-                  updateParams({ horizon: (e.currentTarget as HTMLSelectElement).value })}
-              >
-                {#each MARKOUT_HORIZONS as h}
-                  <option value={h}>{h}</option>
-                {/each}
-              </select>
-              <span
-                class="pointer-events-none absolute inset-y-0 right-3 flex items-center text-zinc-500"
-              >
-                <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
-                  <path
-                    d="M3.5 5.25 7 8.75l3.5-3.5"
-                    stroke="currentColor"
-                    stroke-width="1.4"
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                  />
-                </svg>
-              </span>
-            </div>
-          </label>
+        <div class="flex items-center gap-2">
+          <div class="h-2.5 w-2.5 rounded-full bg-sky-400"></div>
+          <h2 class="text-sm font-semibold text-zinc-100">How Markout Works</h2>
+        </div>
+        <p class="mt-1 text-sm leading-5 text-zinc-400">
+          Track maker-fill markout and view-specific price references only when needed.
+        </p>
+      </div>
+      <span class="rounded-full border border-zinc-700 bg-zinc-950 px-2.5 py-1 text-[11px] text-zinc-300">
+        Expand
+      </span>
+    </summary>
+
+    <div class="border-t border-zinc-800 px-4 py-4 sm:px-5">
+      <div class="grid gap-3 xl:grid-cols-[1.15fr_0.85fr]">
+        <div class="rounded-lg border border-zinc-800/80 bg-zinc-950/40 p-3">
+          <h3 class="text-xs font-semibold uppercase tracking-[0.16em] text-zinc-300">
+            How It's Measured
+          </h3>
+          <div class="mt-3 space-y-2.5">
+            {#each measurementRows as row}
+              <div class="flex flex-col gap-1 rounded-md border border-zinc-800/70 bg-zinc-950/70 px-3 py-2.5 sm:flex-row sm:items-start sm:gap-3">
+                <div class="min-w-0 text-[11px] font-medium uppercase tracking-[0.14em] text-zinc-500 sm:w-28 sm:shrink-0">
+                  {row.label}
+                </div>
+                <p class="text-sm leading-5 text-zinc-300">{row.value}</p>
+              </div>
+            {/each}
+          </div>
+        </div>
+
+        <div class="rounded-lg border border-zinc-800/80 bg-zinc-950/40 p-3">
+          <h3 class="text-xs font-semibold uppercase tracking-[0.16em] text-zinc-300">
+            Data Availability
+          </h3>
+          <div class="mt-3 space-y-2.5">
+            {#each availabilityRows as row}
+              <div class="rounded-md border border-zinc-800/70 bg-zinc-950/70 px-3 py-2.5">
+                <div class="flex items-center justify-between gap-3">
+                  <div class="text-[11px] font-medium uppercase tracking-[0.14em] text-zinc-500">
+                    {row.label}
+                  </div>
+                  <div
+                    class="rounded-full border px-2 py-0.5 text-[11px] {row.value.includes('2s and 3s') || row.value.includes('5s to 300s')
+                      ? 'border-sky-500/40 bg-sky-500/10 text-sky-200'
+                      : 'border-zinc-700 bg-zinc-900 text-zinc-300'}"
+                  >
+                    {row.value}
+                  </div>
+                </div>
+              </div>
+            {/each}
+            <p class="rounded-md border border-amber-500/20 bg-amber-500/8 px-3 py-2.5 text-sm leading-5 text-amber-100/90">
+              Earlier ranges return no data. The dashboard applies these start dates automatically.
+            </p>
+          </div>
         </div>
       </div>
-      {#if topRow}
-        <div class="rounded-lg border border-zinc-800 bg-zinc-900/70 px-3 py-2 text-xs text-zinc-400">
-          Current sort leader: <span class="font-medium text-zinc-200">{topRow.name}</span>
-        </div>
-      {/if}
     </div>
-
-    {#if $seriesError}
-      <ErrorBanner message="Failed to load series data." />
-    {:else if !$seriesData}
-      <ChartSkeleton />
-    {:else}
-      <MarkoutTimeSeriesChart series={coloredSeries} />
-    {/if}
-  </section>
-
-  <div class="mt-6">
-    <MarkoutInfoCard title="Table Notes And Caveats" lines={tableLines} compact={true} />
-  </div>
+  </details>
 
   <section class="mt-6">
     <div class="mb-3 flex flex-wrap items-end justify-between gap-3">
       <div>
-        <h2 class="text-lg font-semibold text-zinc-100">Global MM table — {tableViewLabel}</h2>
+        <h2 class="text-lg font-semibold text-zinc-100">Global MM table — {tableViewLabel}{tableDays !== null ? ` (${tableDays} day${tableDays === 1 ? '' : 's'} data)` : ''}</h2>
         <p class="mt-1 text-sm text-zinc-500">
           Every row opens the MM detail page in the same active view.
         </p>
-        {#if overviewFresh}
-          <span class="text-xs text-zinc-400">{effectiveRange}</span>
-        {/if}
       </div>
       <div class="flex flex-wrap items-end justify-end gap-3">
         <MarkoutRangeSelector
@@ -319,143 +249,129 @@
       </div>
     </div>
 
-    {#if $overviewError}
-      <ErrorBanner message="Failed to load overview data." />
-    {:else if showOverviewSkeleton}
-      <TableSkeleton />
-    {:else}
-      <div class="overflow-x-auto rounded-xl border border-zinc-800 bg-zinc-900/60">
-        <table class="min-w-full text-sm">
-          <thead>
-            <tr class="border-b border-zinc-800 bg-zinc-950/60 text-left text-xs text-zinc-500">
-              <th class="px-4 py-3">
-                <button
-                  type="button"
-                  onclick={() => toggleSort('name')}
-                  class="hover:text-zinc-300"
-                >
-                  MM {sortIndicator('name')}
-                </button>
-              </th>
+    <div class="overflow-x-auto rounded-xl border border-zinc-800 bg-zinc-900/60">
+      <table class="min-w-full text-sm">
+        <thead>
+          <tr class="border-b border-zinc-800 bg-zinc-950/60 text-left text-xs text-zinc-500">
+            <th class="px-4 py-3">
+              <button type="button" onclick={() => toggleSort('name')} class="hover:text-zinc-300">
+                MM {sortIndicator('name')}
+              </button>
+            </th>
+            <th class="px-4 py-3 text-right">
+              <button type="button" onclick={() => toggleSort('fills')} class="hover:text-zinc-300">
+                Fills {sortIndicator('fills')}
+              </button>
+            </th>
+            <th class="px-4 py-3 text-right">
+              <button
+                type="button"
+                onclick={() => toggleSort('avgOrderSize')}
+                class="hover:text-zinc-300"
+              >
+                Avg Fill Size {sortIndicator('avgOrderSize')}
+              </button>
+            </th>
+            <th class="px-4 py-3 text-right">
+              <button
+                type="button"
+                onclick={() => toggleSort('tickerCount')}
+                class="hover:text-zinc-300"
+              >
+                Tickers {sortIndicator('tickerCount')}
+              </button>
+            </th>
+            <th class="px-4 py-3 text-right">
+              <button
+                type="button"
+                onclick={() => toggleSort('totalVolume')}
+                class="hover:text-zinc-300"
+              >
+                Total Volume {sortIndicator('totalVolume')}
+              </button>
+            </th>
+            <th class="px-4 py-3 text-right">
+              <button
+                type="button"
+                onclick={() => toggleSort('makerVolPct')}
+                class="hover:text-zinc-300"
+              >
+                Maker Vol % {sortIndicator('makerVolPct')}
+              </button>
+            </th>
+            <th class="px-4 py-3 text-right">
+              <button
+                type="button"
+                onclick={() => toggleSort('makerTakerRatio')}
+                class="hover:text-zinc-300"
+              >
+                Maker/Taker {sortIndicator('makerTakerRatio')}
+              </button>
+            </th>
+            {#each MARKOUT_HORIZONS as h}
               <th class="px-4 py-3 text-right">
                 <button
                   type="button"
-                  onclick={() => toggleSort('fills')}
+                  onclick={() => h === '5s' && toggleSort('5s')}
                   class="hover:text-zinc-300"
                 >
-                  Fills {sortIndicator('fills')}
+                  {h} PnL {h === '5s' ? sortIndicator('5s') : ''}
                 </button>
               </th>
-              <th class="px-4 py-3 text-right">
-                <button
-                  type="button"
-                  onclick={() => toggleSort('avgOrderSize')}
-                  class="hover:text-zinc-300"
-                >
-                  Avg Fill Size {sortIndicator('avgOrderSize')}
-                </button>
-              </th>
-              <th class="px-4 py-3 text-right">
-                <button
-                  type="button"
-                  onclick={() => toggleSort('tickerCount')}
-                  class="hover:text-zinc-300"
-                >
-                  Tickers {sortIndicator('tickerCount')}
-                </button>
-              </th>
-              <th class="px-4 py-3 text-right">
-                <button
-                  type="button"
-                  onclick={() => toggleSort('totalVolume')}
-                  class="hover:text-zinc-300"
-                >
-                  Total Volume {sortIndicator('totalVolume')}
-                </button>
-              </th>
-              <th class="px-4 py-3 text-right">
-                <button
-                  type="button"
-                  onclick={() => toggleSort('makerVolPct')}
-                  class="hover:text-zinc-300"
-                >
-                  Maker Vol % {sortIndicator('makerVolPct')}
-                </button>
-              </th>
-              <th class="px-4 py-3 text-right">
-                <button
-                  type="button"
-                  onclick={() => toggleSort('makerTakerRatio')}
-                  class="hover:text-zinc-300"
-                >
-                  Maker/Taker {sortIndicator('makerTakerRatio')}
-                </button>
-              </th>
-              {#each MARKOUT_HORIZONS as h}
-                <th class="px-4 py-3 text-right">
-                  <button
-                    type="button"
-                    onclick={() => h === '5s' && toggleSort('5s')}
-                    class="hover:text-zinc-300"
+            {/each}
+          </tr>
+        </thead>
+        <tbody>
+          {#each sortedRows as row}
+            <tr class="border-b border-zinc-800/70 transition-colors hover:bg-zinc-800/30">
+              <td class="px-4 py-3">
+                {#if row.hasDetail}
+                  <a
+                    href={`/markoutPnL/${row.slug}?view=${view}&tableFrom=${tableFrom}&tableTo=${tableTo}`}
+                    data-sveltekit-preload-data="hover"
+                    class="font-medium text-violet-300 hover:text-violet-200"
                   >
-                    {h} PnL {h === '5s' ? sortIndicator('5s') : ''}
-                  </button>
-                </th>
+                    {row.name}
+                  </a>
+                {:else}
+                  <span class="font-medium text-zinc-100">{row.name}</span>
+                {/if}
+              </td>
+              <td class="mono px-4 py-3 text-right text-zinc-300">
+                {row.fills !== null ? row.fills.toLocaleString() : '—'}
+              </td>
+              <td class="mono px-4 py-3 text-right text-zinc-100">
+                {row.avgOrderSize !== null ? formatUsd(row.avgOrderSize) : '—'}
+              </td>
+              <td class="mono px-4 py-3 text-right text-zinc-300">
+                {row.tickerCount !== null ? row.tickerCount : '—'}
+              </td>
+              <td class="mono px-4 py-3 text-right text-zinc-100">
+                {row.totalVolume !== null ? formatUsd(row.totalVolume) : '—'}
+              </td>
+              <td class="mono px-4 py-3 text-right text-zinc-300">
+                {row.makerVolPct !== null ? formatPct(row.makerVolPct) : '—'}
+              </td>
+              <td class="mono px-4 py-3 text-right text-zinc-300">
+                {row.makerTakerRatio !== null ? row.makerTakerRatio.toFixed(2) : '—'}
+              </td>
+              {#each MARKOUT_HORIZONS as h}
+                {@const val = row.horizons[h]}
+                <td
+                  class="mono px-4 py-3 text-right {val === null
+                    ? 'text-zinc-600'
+                    : val >= 0
+                      ? 'text-emerald-300'
+                      : 'text-red-300'}"
+                >
+                  {val !== null ? formatUsd(val) : '—'}
+                </td>
               {/each}
             </tr>
-          </thead>
-          <tbody>
-            {#each sortedRows as row}
-              <tr class="border-b border-zinc-800/70 transition-colors hover:bg-zinc-800/30">
-                <td class="px-4 py-3">
-                  {#if row.hasDetail}
-                    <a
-                      href={`/markoutPnL/${row.slug}?view=${view}&tableFrom=${tableFrom}&tableTo=${tableTo}`}
-                      data-sveltekit-preload-data="hover"
-                      class="font-medium text-violet-300 hover:text-violet-200"
-                    >
-                      {row.name}
-                    </a>
-                  {:else}
-                    <span class="font-medium text-zinc-100">{row.name}</span>
-                  {/if}
-                </td>
-                <td class="mono px-4 py-3 text-right text-zinc-300">
-                  {row.fills !== null ? row.fills.toLocaleString() : '—'}
-                </td>
-                <td class="mono px-4 py-3 text-right text-zinc-100">
-                  {row.avgOrderSize !== null ? formatUsd(row.avgOrderSize) : '—'}
-                </td>
-                <td class="mono px-4 py-3 text-right text-zinc-300">
-                  {row.tickerCount !== null ? row.tickerCount : '—'}
-                </td>
-                <td class="mono px-4 py-3 text-right text-zinc-100">
-                  {row.totalVolume !== null ? formatUsd(row.totalVolume) : '—'}
-                </td>
-                <td class="mono px-4 py-3 text-right text-zinc-300">
-                  {row.makerVolPct !== null ? formatPct(row.makerVolPct) : '—'}
-                </td>
-                <td class="mono px-4 py-3 text-right text-zinc-300">
-                  {row.makerTakerRatio !== null ? row.makerTakerRatio.toFixed(2) : '—'}
-                </td>
-                {#each MARKOUT_HORIZONS as h}
-                  {@const val = row.horizons[h]}
-                  <td
-                    class="mono px-4 py-3 text-right {val === null
-                      ? 'text-zinc-600'
-                      : val >= 0
-                        ? 'text-emerald-300'
-                        : 'text-red-300'}"
-                  >
-                    {val !== null ? formatUsd(val) : '—'}
-                  </td>
-                {/each}
-              </tr>
-            {/each}
-          </tbody>
-        </table>
-      </div>
-    {/if}
+          {/each}
+        </tbody>
+      </table>
+    </div>
   </section>
 
   <section class="mt-6">
@@ -466,12 +382,6 @@
         table range.
       </p>
     </div>
-    {#if $overviewError}
-      <ErrorBanner message="Failed to load overview data." />
-    {:else if showOverviewSkeleton}
-      <ChartSkeleton />
-    {:else}
-      <MarkoutHorizonChart series={horizonChartSeries} />
-    {/if}
+    <MarkoutHorizonChart series={horizonChartSeries} />
   </section>
 </PageShell>

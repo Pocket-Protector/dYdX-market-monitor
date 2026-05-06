@@ -1,8 +1,6 @@
 <script lang="ts">
-  import { useSWR } from 'sswr';
   import { page } from '$app/stores';
   import PageShell from '$lib/components/layout/PageShell.svelte';
-  import MarkoutInfoCard from '$lib/features/markout/MarkoutInfoCard.svelte';
   import MarkoutViewToggle from '$lib/features/markout/MarkoutViewToggle.svelte';
   import MarkoutRangeSelector from '$lib/features/markout/MarkoutRangeSelector.svelte';
   import MarkoutHorizonChart from '$lib/features/markout/MarkoutHorizonChart.svelte';
@@ -12,7 +10,6 @@
     colorForSlug,
     isValidMarkoutView,
     type MarkoutHorizon,
-    type MarkoutMmResponse,
     type MarkoutView
   } from '$lib/features/markout/types';
   import { formatPct, formatUsd } from '$lib/utils/format';
@@ -23,7 +20,12 @@
 
   const { data }: { data: PageData } = $props();
 
-  // --- URL-backed state ---
+  function parseDateOnlyUtc(value: string): number {
+    const [year, month, day] = value.split('-').map(Number);
+    return Date.UTC(year, month - 1, day);
+  }
+
+  // URL-backed state for immediate UI response (toggle highlight, range label).
   const view = $derived<MarkoutView>(
     isValidMarkoutView($page.url.searchParams.get('view'))
       ? ($page.url.searchParams.get('view') as MarkoutView)
@@ -32,35 +34,21 @@
   const from = $derived($page.url.searchParams.get('from') ?? data.from);
   const to = $derived($page.url.searchParams.get('to') ?? data.to);
 
-  // --- sswr ---
-  const mmKey = $derived(
-    `/api/markout/mm/${data.slug}?view=${view}&from=${from}&to=${to}`
-  );
-  const { data: mmData, isLoading, error: mmError } = useSWR<MarkoutMmResponse>(
-    () => mmKey,
-    { refreshInterval: 300_000, dedupingInterval: 1_800_000 }
-  );
+  // data.mmData / data.mmError come from the +page.ts client load which
+  // SvelteKit re-runs whenever the URL params change.
+  const mmData = $derived(data.mmData);
+  const mmError = $derived(data.mmError);
 
-  const dataIsFresh = $derived(
-    Boolean(
-      $mmData &&
-        $mmData.mm.slug === data.slug &&
-        $mmData.range.requestedFrom === from &&
-        $mmData.range.requestedTo === to
-    )
-  );
-  const showSkeleton = $derived(!dataIsFresh && !$mmError);
-  const is404 = $derived(Boolean($mmError && $mmError.message?.includes('404')));
+  const showSkeleton = $derived(mmData === null && !mmError);
+  const is404 = $derived(mmError === '404');
 
-  // --- derived ---
-  const mmName = $derived(dataIsFresh ? $mmData!.mm.name : data.slug);
-  const hasDetailRows = $derived(dataIsFresh && $mmData!.detailRows.length > 0);
+  const mmName = $derived(mmData ? mmData.mm.name : data.slug);
+  const hasDetailRows = $derived(mmData !== null && mmData.detailRows.length > 0);
 
   const horizonChartSeries = $derived.by(() => {
-    if (!dataIsFresh) return [];
-    const d = $mmData!;
-    if (d.detailRows.length > 0) {
-      return d.detailRows.map((row, i) => ({
+    if (!mmData) return [];
+    if (mmData.detailRows.length > 0) {
+      return mmData.detailRows.map((row, i) => ({
         key: row.ticker,
         label: row.ticker,
         color: COLORS[i % COLORS.length],
@@ -72,38 +60,27 @@
     }
     return [
       {
-        key: d.mm.slug,
-        label: d.mm.name,
-        color: colorForSlug(d.mm.slug),
+        key: mmData.mm.slug,
+        label: mmData.mm.name,
+        color: colorForSlug(mmData.mm.slug),
         points: MARKOUT_HORIZONS.map((h) => ({
           horizon: h as MarkoutHorizon,
-          value: d.summaryRow.horizons[h] ?? 0
+          value: mmData.summaryRow.horizons[h] ?? 0
         }))
       }
     ];
   });
 
-  // --- info card ---
-  const detailCopy = $derived.by(() => {
-    if (hasDetailRows) {
-      return [
-        `Showing ${view === 'dydx' ? 'dYdX Mid' : 'Index Mids'} markout for ${mmName}.`,
-        'The ticker table and horizon chart break down markout by individual trading pair.',
-        'All rows use the same maker-only markout methodology as the global page.'
-      ];
-    }
-    return [
-      `Ticker-level breakdown is not available for ${mmName} in the selected range.`,
-      'The horizon curve below shows MM-level markout across all horizons.',
-      'The active view is still respected, so dYdX Mid and Index Mids can be compared.'
-    ];
-  });
+  // Capture table range on first mount for the back-link.
+  // After the range selector clears tableFrom/tableTo from the URL, data.tableFrom
+  // becomes null — but the back-link should still return to the original global range.
+  const initialTableFrom = data.tableFrom;
+  const initialTableTo = data.tableTo;
 
-  // --- back-link ---
   const backHref = $derived.by(() => {
     const params = new URLSearchParams({ view });
-    if (data.tableFrom) params.set('tableFrom', data.tableFrom);
-    if (data.tableTo) params.set('tableTo', data.tableTo);
+    if (initialTableFrom) params.set('tableFrom', initialTableFrom);
+    if (initialTableTo) params.set('tableTo', initialTableTo);
     return `/markoutPnL?${params.toString()}`;
   });
 
@@ -111,10 +88,17 @@
   const maxDate = $derived(data.meta.availability[view].maxDate);
 
   const effectiveRange = $derived(
-    dataIsFresh
-      ? `${$mmData!.range.effectiveFrom} – ${$mmData!.range.effectiveTo}`
+    mmData
+      ? `${mmData.range.effectiveFrom} – ${mmData.range.effectiveTo}`
       : `${from} – ${to}`
   );
+
+  const daysTracked = $derived.by(() => {
+    if (!mmData) return null;
+    const start = parseDateOnlyUtc(mmData.range.effectiveFrom);
+    const end = parseDateOnlyUtc(mmData.range.effectiveTo);
+    return Math.floor((end - start) / 86_400_000) + 1;
+  });
 </script>
 
 <PageShell>
@@ -137,6 +121,7 @@
         max={maxDate}
         paramFromKey="from"
         paramToKey="to"
+        clearOnApply={['tableFrom', 'tableTo']}
         label="Date range"
         helperText="This date range updates only this MM's data."
       />
@@ -152,52 +137,40 @@
       <div class="rounded-xl border border-zinc-800 bg-zinc-900/60 p-4">
         <div class="text-[11px] uppercase tracking-wide text-zinc-500">Total fills</div>
         <div class="mt-1 text-lg font-semibold text-zinc-100">
-          {dataIsFresh && $mmData!.summaryRow.fills !== null
-            ? $mmData!.summaryRow.fills.toLocaleString()
+          {mmData?.summaryRow.fills !== null && mmData?.summaryRow.fills !== undefined
+            ? mmData.summaryRow.fills.toLocaleString()
             : '—'}
         </div>
       </div>
       <div class="rounded-xl border border-zinc-800 bg-zinc-900/60 p-4">
-        <div class="text-[11px] uppercase tracking-wide text-zinc-500">Avg fill size</div>
+        <div class="text-[11px] uppercase tracking-wide text-zinc-500">Total volume</div>
         <div class="mt-1 text-lg font-semibold text-zinc-100">
-          {dataIsFresh && $mmData!.summaryRow.avgOrderSize !== null
-            ? formatUsd($mmData!.summaryRow.avgOrderSize)
+          {mmData?.summaryRow.totalVolume !== null && mmData?.summaryRow.totalVolume !== undefined
+            ? formatUsd(mmData.summaryRow.totalVolume)
             : '—'}
         </div>
       </div>
       <div class="rounded-xl border border-zinc-800 bg-zinc-900/60 p-4">
         <div class="text-[11px] uppercase tracking-wide text-zinc-500">Maker vol %</div>
         <div class="mt-1 text-lg font-semibold text-zinc-100">
-          {dataIsFresh && $mmData!.summaryRow.makerVolPct !== null
-            ? formatPct($mmData!.summaryRow.makerVolPct)
+          {mmData?.summaryRow.makerVolPct !== null && mmData?.summaryRow.makerVolPct !== undefined
+            ? formatPct(mmData.summaryRow.makerVolPct)
             : '—'}
         </div>
       </div>
       <div class="rounded-xl border border-zinc-800 bg-zinc-900/60 p-4">
-        <div class="text-[11px] uppercase tracking-wide text-zinc-500">5s PnL</div>
-        <div
-          class="mt-1 text-lg font-semibold {!dataIsFresh || $mmData!.summaryRow.horizons['5s'] === null
-            ? 'text-zinc-500'
-            : ($mmData!.summaryRow.horizons['5s'] ?? 0) >= 0
-              ? 'text-emerald-300'
-              : 'text-red-300'}"
-        >
-          {dataIsFresh && $mmData!.summaryRow.horizons['5s'] !== null
-            ? formatUsd($mmData!.summaryRow.horizons['5s']!)
-            : '—'}
+        <div class="text-[11px] uppercase tracking-wide text-zinc-500">Date range</div>
+        <div class="mt-1 text-lg font-semibold text-zinc-100">
+          {daysTracked !== null ? `${daysTracked} day${daysTracked === 1 ? '' : 's'}` : '—'}
         </div>
       </div>
     </div>
 
-    {#if dataIsFresh && $mmData!.summaryRow.fills === null}
+    {#if mmData && mmData.summaryRow.fills === null}
       <div class="mt-6 rounded-xl border border-zinc-700 bg-zinc-900/40 px-4 py-8 text-center text-sm text-zinc-500">
         No data available for this MM in the selected range.
       </div>
     {:else}
-      <div class="mt-6">
-        <MarkoutInfoCard title="MM Detail Context" lines={detailCopy} compact={true} />
-      </div>
-
       <section class="mt-6">
         <div class="mb-3">
           <h2 class="text-lg font-semibold text-zinc-100">
@@ -206,11 +179,8 @@
           <p class="text-sm text-zinc-500">
             {hasDetailRows ? 'Each line is a ticker for this MM.' : 'MM-level markout across all horizons.'}
           </p>
-          {#if dataIsFresh}
-            <span class="text-xs text-zinc-400">{effectiveRange}</span>
-          {/if}
         </div>
-        {#if $mmError && !is404}
+        {#if mmError && !is404}
           <ErrorBanner message="Failed to load MM data." />
         {:else if showSkeleton}
           <ChartSkeleton />
@@ -229,7 +199,7 @@
           </p>
         </div>
 
-        {#if $mmError && !is404}
+        {#if mmError && !is404}
           <ErrorBanner message="Failed to load MM data." />
         {:else if showSkeleton}
           <TableSkeleton />
@@ -253,7 +223,7 @@
                 </tr>
               </thead>
               <tbody>
-                {#each $mmData!.detailRows as row}
+                {#each mmData!.detailRows as row}
                   <tr class="border-b border-zinc-800/70 transition-colors hover:bg-zinc-800/30">
                     <td class="px-4 py-3 font-medium text-zinc-100">{row.ticker}</td>
                     <td class="mono px-4 py-3 text-right text-zinc-300">

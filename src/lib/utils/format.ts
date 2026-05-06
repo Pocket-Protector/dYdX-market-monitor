@@ -14,9 +14,10 @@ export function formatCompact(val: number): string {
 export function formatUsd(val: number | null | undefined): string {
   if (val == null) return '—';
   const abs = Math.abs(val);
-  if (abs >= 1_000_000) return `$${(val / 1_000_000).toFixed(2)}M`;
-  if (abs >= 1_000) return `$${(val / 1_000).toFixed(1)}K`;
-  return `$${val.toFixed(0)}`;
+  const sign = val < 0 ? '-$' : '$';
+  if (abs >= 1_000_000) return `${sign}${(abs / 1_000_000).toFixed(2)}M`;
+  if (abs >= 1_000) return `${sign}${(abs / 1_000).toFixed(1)}K`;
+  return `${sign}${abs.toFixed(0)}`;
 }
 
 export function formatBps(val: number | null | undefined): string {
