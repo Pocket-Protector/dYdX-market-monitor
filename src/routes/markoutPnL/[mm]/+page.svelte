@@ -12,6 +12,7 @@
     type MarkoutHorizon,
     type MarkoutView
   } from '$lib/features/markout/types';
+  import { buildMarkoutTickerCsv, buildMarkoutTickerCsvFilename } from '$lib/features/markout/export.js';
   import { formatPct, formatUsd } from '$lib/utils/format';
   import TableSkeleton from '$lib/shared/components/skeletons/TableSkeleton.svelte';
   import ChartSkeleton from '$lib/shared/components/skeletons/ChartSkeleton.svelte';
@@ -99,6 +100,19 @@
     const end = parseDateOnlyUtc(mmData.range.effectiveTo);
     return Math.floor((end - start) / 86_400_000) + 1;
   });
+
+  function downloadTickerTableCsv() {
+    if (!mmData || mmData.detailRows.length === 0) return;
+    const csv = buildMarkoutTickerCsv(mmData.detailRows, view, mmData.mm.name);
+    const filename = buildMarkoutTickerCsvFilename(mmData.mm.slug, view);
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = filename;
+    anchor.click();
+    URL.revokeObjectURL(url);
+  }
 </script>
 
 <PageShell>
@@ -190,13 +204,24 @@
       </section>
 
       <section class="mt-6">
-        <div class="mb-3">
-          <h2 class="text-lg font-semibold text-zinc-100">Ticker table</h2>
-          <p class="text-sm text-zinc-500">
-            {hasDetailRows
-              ? 'Columns mirror the markout horizons on the global page.'
-              : 'Ticker-level rows are not available for this MM in the selected range.'}
-          </p>
+        <div class="mb-3 flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <h2 class="text-lg font-semibold text-zinc-100">Ticker table</h2>
+            <p class="text-sm text-zinc-500">
+              {hasDetailRows
+                ? 'Columns mirror the markout horizons on the global page.'
+                : 'Ticker-level rows are not available for this MM in the selected range.'}
+            </p>
+          </div>
+          {#if hasDetailRows}
+            <button
+              type="button"
+              onclick={downloadTickerTableCsv}
+              class="rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-200 transition-colors hover:border-zinc-500 hover:text-white"
+            >
+              Download CSV
+            </button>
+          {/if}
         </div>
 
         {#if mmError && !is404}
