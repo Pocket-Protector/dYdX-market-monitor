@@ -1,6 +1,6 @@
 <script lang="ts">
   import PageShell from '$lib/components/layout/PageShell.svelte';
-  import MarkoutRangeSelector from '$lib/features/markout/MarkoutRangeSelector.svelte';
+  import MarkoutRangeSelector from '$lib/shared/components/DateRangeSelector.svelte';
   import MarkoutViewToggle from '$lib/features/markout/MarkoutViewToggle.svelte';
   import MarkoutHorizonChart from '$lib/features/markout/MarkoutHorizonChart.svelte';
   import { buildMarkoutGlobalCsv, buildMarkoutGlobalCsvFilename } from '$lib/features/markout/export.js';

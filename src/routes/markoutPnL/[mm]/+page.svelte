@@ -2,7 +2,7 @@
   import { page } from '$app/stores';
   import PageShell from '$lib/components/layout/PageShell.svelte';
   import MarkoutViewToggle from '$lib/features/markout/MarkoutViewToggle.svelte';
-  import MarkoutRangeSelector from '$lib/features/markout/MarkoutRangeSelector.svelte';
+  import MarkoutRangeSelector from '$lib/shared/components/DateRangeSelector.svelte';
   import MarkoutHorizonChart from '$lib/features/markout/MarkoutHorizonChart.svelte';
   import {
     MARKOUT_HORIZONS,
