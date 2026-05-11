@@ -48,7 +48,7 @@ export const SlaUptimeRowSchema = z.object({
   tickBps: z.number(),
   l1AdjBps: z.number(),
   l1Usd: z.number(),
-  l1FilledAtBps: z.number(),
+  l1FilledAtBps: z.number().nullable(),
   l1UptimePct: z.number(),
   l2AdjBps: z.number().nullable(),
   l2Usd: z.number().nullable(),

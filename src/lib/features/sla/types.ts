@@ -46,7 +46,7 @@ export interface SlaUptimeRow {
   tickBps: number;
   l1AdjBps: number;
   l1Usd: number;
-  l1FilledAtBps: number;
+  l1FilledAtBps: number | null;
   l1UptimePct: number;
   l2AdjBps: number | null;
   l2Usd: number | null;

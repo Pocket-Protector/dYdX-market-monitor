@@ -4,6 +4,10 @@
   import TableSkeleton from '$lib/shared/components/skeletons/TableSkeleton.svelte';
   import ErrorBanner from '$lib/shared/components/ErrorBanner.svelte';
   import { formatUsd, formatPct, formatBps } from '$lib/utils/format';
+  import {
+    buildSlaLiquidityCsv, buildSlaLiquidityCsvFilename,
+    buildSlaUptimeCsv, buildSlaUptimeCsvFilename
+  } from '$lib/features/sla/export';
   import type { PageData } from './$types';
 
   const { data }: { data: PageData } = $props();
@@ -101,13 +105,81 @@
     if (uptimeSortCol !== col) return '↕';
     return uptimeSortDir === 'asc' ? '↑' : '↓';
   }
+
+  let walletsOpen = $state(false);
+
+  const rangeDays = $derived(
+    Math.round(
+      (new Date(to ?? data.defaultTo).getTime() - new Date(from ?? data.defaultFrom).getTime()) /
+        (1000 * 60 * 60 * 24)
+    ) + 1
+  );
+
+  function triggerDownload(csv: string, filename: string) {
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = filename;
+    anchor.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function downloadLiquidityCsv() {
+    if (!liquidityData) return;
+    const f = from ?? data.defaultFrom;
+    const t = to ?? data.defaultTo;
+    triggerDownload(
+      buildSlaLiquidityCsv(liquidityData.rows, data.slug, f, t),
+      buildSlaLiquidityCsvFilename(data.slug, f, t)
+    );
+  }
+
+  function downloadUptimeCsv() {
+    if (!uptimeData) return;
+    const f = from ?? data.defaultFrom;
+    const t = to ?? data.defaultTo;
+    triggerDownload(
+      buildSlaUptimeCsv(uptimeData.rows, data.slug, f, t),
+      buildSlaUptimeCsvFilename(data.slug, f, t)
+    );
+  }
 </script>
 
 <PageShell>
   <div class="mb-6 flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
     <div>
       <a href="/sla" class="text-sm text-violet-300 hover:text-violet-200">← Back to MM SLA</a>
-      <h1 class="mt-3 text-2xl font-semibold text-zinc-100">{data.displayName}</h1>
+      <div class="mt-3 flex flex-wrap items-center gap-3">
+        <h1 class="text-2xl font-semibold text-zinc-100">{data.displayName}</h1>
+        <button
+          type="button"
+          onclick={() => (walletsOpen = !walletsOpen)}
+          class="rounded-full border border-zinc-700 bg-zinc-800 px-2.5 py-1 text-[11px] text-zinc-400 transition-colors hover:border-zinc-500 hover:text-zinc-200"
+        >
+          {walletsOpen ? 'Hide wallets' : 'Wallets tracked'}
+        </button>
+        {#if liquidityData}
+          <span class="rounded-full border border-zinc-700 bg-zinc-900/60 px-2.5 py-1 text-[11px] text-zinc-400">
+            Avg Liquidity: <span class="text-zinc-200">{formatUsd(liquidityData.totalAvgLiquidityQuotedUsd)}</span>
+          </span>
+          <span class="rounded-full border border-zinc-700 bg-zinc-900/60 px-2.5 py-1 text-[11px] text-zinc-400">
+            Tickers: <span class="text-zinc-200">{liquidityData.rows.length}</span>
+          </span>
+        {/if}
+      </div>
+      {#if walletsOpen}
+        <div class="mt-3 flex flex-col gap-2">
+          {#each data.wallets as wallet}
+            <div class="rounded-lg border border-zinc-800 bg-zinc-900/60 px-3 py-2 text-xs">
+              <span class="mono text-zinc-200">{wallet.address}</span>
+              <span class="ml-3 text-zinc-500">
+                subaccounts: {wallet.subaccounts.join(', ')}
+              </span>
+            </div>
+          {/each}
+        </div>
+      {/if}
     </div>
     <DateRangeSelector
       from={from ?? data.defaultFrom}
@@ -210,7 +282,21 @@
 
   <!-- Table 2: Liquidity -->
   <section class="mt-6">
-    <h2 class="mb-3 text-lg font-semibold text-zinc-100">Liquidity</h2>
+    <div class="mb-3 flex items-baseline justify-between">
+      <h2 class="flex items-baseline gap-2 text-lg font-semibold text-zinc-100">
+        Liquidity
+        <span class="text-sm font-normal text-zinc-500">{rangeDays} days</span>
+      </h2>
+      {#if liquidityData}
+        <button
+          type="button"
+          onclick={downloadLiquidityCsv}
+          class="rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-200 transition-colors hover:border-zinc-500 hover:text-white"
+        >
+          Download CSV
+        </button>
+      {/if}
+    </div>
     {#if liquidityError}
       <ErrorBanner message="Failed to load liquidity data." />
     {:else if showLiquiditySkeleton}
@@ -317,7 +403,21 @@
 
   <!-- Table 3: Uptime Detail -->
   <section class="mt-6 mb-8">
-    <h2 class="mb-3 text-lg font-semibold text-zinc-100">Uptime Detail</h2>
+    <div class="mb-3 flex items-baseline justify-between">
+      <h2 class="flex items-baseline gap-2 text-lg font-semibold text-zinc-100">
+        Uptime Detail
+        <span class="text-sm font-normal text-zinc-500">{rangeDays} days</span>
+      </h2>
+      {#if uptimeData}
+        <button
+          type="button"
+          onclick={downloadUptimeCsv}
+          class="rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-200 transition-colors hover:border-zinc-500 hover:text-white"
+        >
+          Download CSV
+        </button>
+      {/if}
+    </div>
     {#if uptimeError}
       <ErrorBanner message="Failed to load uptime data." />
     {:else if showUptimeSkeleton}
@@ -338,49 +438,103 @@
                 </button>
               </th>
               <th class="px-4 py-3 text-right">
-                <button type="button" onclick={() => toggleUptimeSort('tickBps')} class="hover:text-zinc-300">
-                  Tick bps {usi('tickBps')}
-                </button>
+                <span class="group/tip relative inline-flex items-center justify-end gap-1">
+                  <button type="button" onclick={() => toggleUptimeSort('tickBps')} class="hover:text-zinc-300">
+                    Tick bps {usi('tickBps')}
+                  </button>
+                  <span class="cursor-help text-zinc-600 hover:text-zinc-400">ⓘ</span>
+                  <span class="pointer-events-none absolute right-0 top-full z-20 mt-1 w-52 rounded-lg border border-zinc-700 bg-zinc-900 px-2.5 py-2 text-left text-[11px] font-normal leading-snug text-zinc-300 opacity-0 shadow-xl transition-opacity group-hover/tip:opacity-100">
+                    Minimum price increment for this market, in basis points.
+                  </span>
+                </span>
               </th>
               <th class="px-4 py-3 text-right">
-                <button type="button" onclick={() => toggleUptimeSort('l1AdjBps')} class="hover:text-zinc-300">
-                  L1 adj bps {usi('l1AdjBps')}
-                </button>
+                <span class="group/tip relative inline-flex items-center justify-end gap-1">
+                  <button type="button" onclick={() => toggleUptimeSort('l1AdjBps')} class="hover:text-zinc-300">
+                    L1 adj bps {usi('l1AdjBps')}
+                  </button>
+                  <span class="cursor-help text-zinc-600 hover:text-zinc-400">ⓘ</span>
+                  <span class="pointer-events-none absolute right-0 top-full z-20 mt-1 w-60 rounded-lg border border-zinc-700 bg-zinc-900 px-2.5 py-2 text-left text-[11px] font-normal leading-snug text-zinc-300 opacity-0 shadow-xl transition-opacity group-hover/tip:opacity-100">
+                    SLA required spread plus one tick, in basis points — the effective spread threshold used when measuring uptime.
+                  </span>
+                </span>
               </th>
               <th class="px-4 py-3 text-right">
-                <button type="button" onclick={() => toggleUptimeSort('l1Usd')} class="hover:text-zinc-300">
-                  L1 USD {usi('l1Usd')}
-                </button>
+                <span class="group/tip relative inline-flex items-center justify-end gap-1">
+                  <button type="button" onclick={() => toggleUptimeSort('l1Usd')} class="hover:text-zinc-300">
+                    L1 USD {usi('l1Usd')}
+                  </button>
+                  <span class="cursor-help text-zinc-600 hover:text-zinc-400">ⓘ</span>
+                  <span class="pointer-events-none absolute right-0 top-full z-20 mt-1 w-56 rounded-lg border border-zinc-700 bg-zinc-900 px-2.5 py-2 text-left text-[11px] font-normal leading-snug text-zinc-300 opacity-0 shadow-xl transition-opacity group-hover/tip:opacity-100">
+                    Required liquidity depth in USD at the L1 spread level, as defined in the SLA.
+                  </span>
+                </span>
               </th>
               <th class="px-4 py-3 text-right">
-                <button type="button" onclick={() => toggleUptimeSort('l1FilledAtBps')} class="hover:text-zinc-300">
-                  L1 filled-at bps {usi('l1FilledAtBps')}
-                </button>
+                <span class="group/tip relative inline-flex items-center justify-end gap-1">
+                  <button type="button" onclick={() => toggleUptimeSort('l1FilledAtBps')} class="hover:text-zinc-300">
+                    L1 filled-at bps {usi('l1FilledAtBps')}
+                  </button>
+                  <span class="cursor-help text-zinc-600 hover:text-zinc-400">ⓘ</span>
+                  <span class="pointer-events-none absolute right-0 top-full z-20 mt-1 w-64 rounded-lg border border-zinc-700 bg-zinc-900 px-2.5 py-2 text-left text-[11px] font-normal leading-snug text-zinc-300 opacity-0 shadow-xl transition-opacity group-hover/tip:opacity-100">
+                    The bps at which the L1 USD requirement was met. At or below L1 adj bps = within SLA.
+                  </span>
+                </span>
               </th>
               <th class="px-4 py-3 text-right">
-                <button type="button" onclick={() => toggleUptimeSort('l1UptimePct')} class="hover:text-zinc-300">
-                  L1 Uptime % {usi('l1UptimePct')}
-                </button>
+                <span class="group/tip relative inline-flex items-center justify-end gap-1">
+                  <button type="button" onclick={() => toggleUptimeSort('l1UptimePct')} class="hover:text-zinc-300">
+                    L1 Uptime % {usi('l1UptimePct')}
+                  </button>
+                  <span class="cursor-help text-zinc-600 hover:text-zinc-400">ⓘ</span>
+                  <span class="pointer-events-none absolute right-0 top-full z-20 mt-1 w-64 rounded-lg border border-zinc-700 bg-zinc-900 px-2.5 py-2 text-left text-[11px] font-normal leading-snug text-zinc-300 opacity-0 shadow-xl transition-opacity group-hover/tip:opacity-100">
+                    Percentage of time both bid and ask sides simultaneously met the L1 liquidity requirement. Minutes when the system was down are excluded from the calculation.
+                  </span>
+                </span>
               </th>
               <th class="px-4 py-3 text-right">
-                <button type="button" onclick={() => toggleUptimeSort('l2AdjBps')} class="hover:text-zinc-300">
-                  L2 adj bps {usi('l2AdjBps')}
-                </button>
+                <span class="group/tip relative inline-flex items-center justify-end gap-1">
+                  <button type="button" onclick={() => toggleUptimeSort('l2AdjBps')} class="hover:text-zinc-300">
+                    L2 adj bps {usi('l2AdjBps')}
+                  </button>
+                  <span class="cursor-help text-zinc-600 hover:text-zinc-400">ⓘ</span>
+                  <span class="pointer-events-none absolute right-0 top-full z-20 mt-1 w-60 rounded-lg border border-zinc-700 bg-zinc-900 px-2.5 py-2 text-left text-[11px] font-normal leading-snug text-zinc-300 opacity-0 shadow-xl transition-opacity group-hover/tip:opacity-100">
+                    SLA required spread plus one tick, in basis points — the effective spread threshold used when measuring uptime.
+                  </span>
+                </span>
               </th>
               <th class="px-4 py-3 text-right">
-                <button type="button" onclick={() => toggleUptimeSort('l2Usd')} class="hover:text-zinc-300">
-                  L2 USD {usi('l2Usd')}
-                </button>
+                <span class="group/tip relative inline-flex items-center justify-end gap-1">
+                  <button type="button" onclick={() => toggleUptimeSort('l2Usd')} class="hover:text-zinc-300">
+                    L2 USD {usi('l2Usd')}
+                  </button>
+                  <span class="cursor-help text-zinc-600 hover:text-zinc-400">ⓘ</span>
+                  <span class="pointer-events-none absolute right-0 top-full z-20 mt-1 w-56 rounded-lg border border-zinc-700 bg-zinc-900 px-2.5 py-2 text-left text-[11px] font-normal leading-snug text-zinc-300 opacity-0 shadow-xl transition-opacity group-hover/tip:opacity-100">
+                    Required liquidity depth in USD at the L2 spread level, as defined in the SLA.
+                  </span>
+                </span>
               </th>
               <th class="px-4 py-3 text-right">
-                <button type="button" onclick={() => toggleUptimeSort('l2FilledAtBps')} class="hover:text-zinc-300">
-                  L2 filled-at bps {usi('l2FilledAtBps')}
-                </button>
+                <span class="group/tip relative inline-flex items-center justify-end gap-1">
+                  <button type="button" onclick={() => toggleUptimeSort('l2FilledAtBps')} class="hover:text-zinc-300">
+                    L2 filled-at bps {usi('l2FilledAtBps')}
+                  </button>
+                  <span class="cursor-help text-zinc-600 hover:text-zinc-400">ⓘ</span>
+                  <span class="pointer-events-none absolute right-0 top-full z-20 mt-1 w-64 rounded-lg border border-zinc-700 bg-zinc-900 px-2.5 py-2 text-left text-[11px] font-normal leading-snug text-zinc-300 opacity-0 shadow-xl transition-opacity group-hover/tip:opacity-100">
+                    The bps at which the L2 USD requirement was met. At or below L2 adj bps = within SLA.
+                  </span>
+                </span>
               </th>
               <th class="px-4 py-3 text-right">
-                <button type="button" onclick={() => toggleUptimeSort('l2UptimePct')} class="hover:text-zinc-300">
-                  L2 Uptime % {usi('l2UptimePct')}
-                </button>
+                <span class="group/tip relative inline-flex items-center justify-end gap-1">
+                  <button type="button" onclick={() => toggleUptimeSort('l2UptimePct')} class="hover:text-zinc-300">
+                    L2 Uptime % {usi('l2UptimePct')}
+                  </button>
+                  <span class="cursor-help text-zinc-600 hover:text-zinc-400">ⓘ</span>
+                  <span class="pointer-events-none absolute right-0 top-full z-20 mt-1 w-64 rounded-lg border border-zinc-700 bg-zinc-900 px-2.5 py-2 text-left text-[11px] font-normal leading-snug text-zinc-300 opacity-0 shadow-xl transition-opacity group-hover/tip:opacity-100">
+                    Percentage of time both bid and ask sides simultaneously met the L2 liquidity requirement. Minutes when the system was down are excluded from the calculation.
+                  </span>
+                </span>
               </th>
             </tr>
           </thead>
