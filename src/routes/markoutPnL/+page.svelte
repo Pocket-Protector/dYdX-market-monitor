@@ -17,6 +17,10 @@
   const view = $derived<MarkoutView>(data.view);
   const tableFrom = $derived(data.tableFrom);
   const tableTo = $derived(data.tableTo);
+  const TOTAL_PNL_TOOLTIP =
+    'Trading performance for the selected date range. Deposits and withdrawals are removed.';
+  const NET_FUNDING_TOOLTIP =
+    'Funding for the selected date range. Positive means received; negative means paid.';
 
   const coloredRows = $derived(
     data.initialOverview.rows.map((row) => ({
@@ -39,6 +43,8 @@
     | 'fills'
     | 'avgOrderSize'
     | 'tickerCount'
+    | 'totalPnl'
+    | 'netFunding'
     | 'totalVolume'
     | 'makerVolPct'
     | 'makerTakerRatio'
@@ -116,6 +122,29 @@
     }
   ];
 
+  const pnlFundingRows = [
+    {
+      label: 'Total PnL',
+      value:
+        'Shows trading performance for the selected date range after removing deposits and withdrawals.'
+    },
+    {
+      label: 'Transfers',
+      value:
+        'Transfers in and out are removed, so moving money between wallets is not counted as profit or loss.'
+    },
+    {
+      label: 'Net Funding',
+      value:
+        'Shows funding over the selected date range. Positive means received funding; negative means paid funding.'
+    },
+    {
+      label: 'Relationship',
+      value:
+        'Funding is already part of Total PnL. Do not add Net Funding on top of Total PnL.'
+    }
+  ];
+
   const availabilityRows = [
     {
       label: 'dYdX Mid',
@@ -164,7 +193,7 @@
           <h2 class="text-sm font-semibold text-zinc-100">How Markout Works</h2>
         </div>
         <p class="mt-1 text-sm leading-5 text-zinc-400">
-          Track maker-fill markout and view-specific price references only when needed.
+          Track maker-fill markout, period PnL, net funding, and view-specific price references only when needed.
         </p>
       </div>
       <span class="rounded-full border border-zinc-700 bg-zinc-950 px-2.5 py-1 text-[11px] text-zinc-300">
@@ -173,7 +202,7 @@
     </summary>
 
     <div class="border-t border-zinc-800 px-4 py-4 sm:px-5">
-      <div class="grid gap-3 xl:grid-cols-[1.15fr_0.85fr]">
+      <div class="grid gap-3 xl:grid-cols-3">
         <div class="rounded-lg border border-zinc-800/80 bg-zinc-950/40 p-3">
           <h3 class="text-xs font-semibold uppercase tracking-[0.16em] text-zinc-300">
             How It's Measured
@@ -182,6 +211,22 @@
             {#each measurementRows as row}
               <div class="flex flex-col gap-1 rounded-md border border-zinc-800/70 bg-zinc-950/70 px-3 py-2.5 sm:flex-row sm:items-start sm:gap-3">
                 <div class="min-w-0 text-[11px] font-medium uppercase tracking-[0.14em] text-zinc-500 sm:w-28 sm:shrink-0">
+                  {row.label}
+                </div>
+                <p class="text-sm leading-5 text-zinc-300">{row.value}</p>
+              </div>
+            {/each}
+          </div>
+        </div>
+
+        <div class="rounded-lg border border-zinc-800/80 bg-zinc-950/40 p-3">
+          <h3 class="text-xs font-semibold uppercase tracking-[0.16em] text-zinc-300">
+            PnL And Funding
+          </h3>
+          <div class="mt-3 space-y-2.5">
+            {#each pnlFundingRows as row}
+              <div class="flex flex-col gap-1 rounded-md border border-zinc-800/70 bg-zinc-950/70 px-3 py-2.5">
+                <div class="text-[11px] font-medium uppercase tracking-[0.14em] text-zinc-500">
                   {row.label}
                 </div>
                 <p class="text-sm leading-5 text-zinc-300">{row.value}</p>
@@ -219,6 +264,16 @@
       </div>
     </div>
   </details>
+
+  {#if data.pnlError || data.fundingError}
+    <div class="mt-4 rounded-xl border border-amber-500/25 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
+      Markout data loaded, but {data.pnlError && data.fundingError
+        ? 'PnL and funding data are'
+        : data.pnlError
+          ? 'PnL data is'
+          : 'funding data is'} unavailable for this range. Affected values are shown as -.
+    </div>
+  {/if}
 
   <section class="mt-6">
     <div class="mb-3 flex flex-wrap items-end justify-between gap-3">
@@ -284,6 +339,26 @@
             <th class="px-4 py-3 text-right">
               <button
                 type="button"
+                title={TOTAL_PNL_TOOLTIP}
+                onclick={() => toggleSort('totalPnl')}
+                class="hover:text-zinc-300"
+              >
+                Total PnL {sortIndicator('totalPnl')}
+              </button>
+            </th>
+            <th class="px-4 py-3 text-right">
+              <button
+                type="button"
+                title={NET_FUNDING_TOOLTIP}
+                onclick={() => toggleSort('netFunding')}
+                class="hover:text-zinc-300"
+              >
+                Net Funding {sortIndicator('netFunding')}
+              </button>
+            </th>
+            <th class="px-4 py-3 text-right">
+              <button
+                type="button"
                 onclick={() => toggleSort('totalVolume')}
                 class="hover:text-zinc-300"
               >
@@ -327,7 +402,7 @@
               <td class="px-4 py-3">
                 {#if row.hasDetail}
                   <a
-                    href={`/markoutPnL/${row.slug}?view=${view}&tableFrom=${tableFrom}&tableTo=${tableTo}`}
+                    href={`/markoutPnL/${row.slug}?view=${view}&from=${tableFrom}&to=${tableTo}&tableFrom=${tableFrom}&tableTo=${tableTo}`}
                     data-sveltekit-preload-data="hover"
                     class="font-medium text-violet-300 hover:text-violet-200"
                   >
@@ -345,6 +420,26 @@
               </td>
               <td class="mono px-4 py-3 text-right text-zinc-300">
                 {row.tickerCount !== null ? row.tickerCount : '—'}
+              </td>
+              <td
+                title={TOTAL_PNL_TOOLTIP}
+                class="mono px-4 py-3 text-right {row.totalPnl === null || row.totalPnl === undefined
+                  ? 'text-zinc-600'
+                  : row.totalPnl >= 0
+                    ? 'text-emerald-300'
+                    : 'text-red-300'}"
+              >
+                {row.totalPnl !== null && row.totalPnl !== undefined ? formatUsd(row.totalPnl) : '—'}
+              </td>
+              <td
+                title={NET_FUNDING_TOOLTIP}
+                class="mono px-4 py-3 text-right {row.netFunding === null || row.netFunding === undefined
+                  ? 'text-zinc-600'
+                  : row.netFunding >= 0
+                    ? 'text-emerald-300'
+                    : 'text-red-300'}"
+              >
+                {row.netFunding !== null && row.netFunding !== undefined ? formatUsd(row.netFunding) : '—'}
               </td>
               <td class="mono px-4 py-3 text-right text-zinc-100">
                 {row.totalVolume !== null ? formatUsd(row.totalVolume) : '—'}

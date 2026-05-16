@@ -55,6 +55,8 @@ export interface MarkoutOverviewRow {
   fills: number | null;
   avgOrderSize: number | null;
   tickerCount: number | null;
+  totalPnl?: number | null;
+  netFunding?: number | null;
   totalVolume: number | null;
   makerVolPct: number | null;
   takerVolPct: number | null;
@@ -96,6 +98,7 @@ export interface MarkoutMmDetailRow {
   ticker: string;
   fills: number | null;
   avgOrderSize: number | null;
+  netFunding?: number | null;
   horizons: Record<MarkoutHorizon, number | null>;
 }
 
@@ -104,4 +107,59 @@ export interface MarkoutMmResponse {
   range: MarkoutRange;
   summaryRow: MarkoutMmSummaryRow;
   detailRows: MarkoutMmDetailRow[];
+}
+
+export interface PnlOverviewResponse {
+  rows: {
+    mmSlug: string;
+    displayName: string;
+    periodPnlUsd: number | null;
+    startTotalPnl: number | null;
+    endTotalPnl: number | null;
+    walletCount: number;
+  }[];
+}
+
+export interface PnlMmResponse {
+  mmSlug: string;
+  displayName: string;
+  periodPnlUsd: number | null;
+  startTotalPnl: number | null;
+  endTotalPnl: number | null;
+  startEquity: number | null;
+  endEquity: number | null;
+  netTransfersDelta: number | null;
+  byWallet: {
+    address: string;
+    subaccountNumber: number;
+    periodPnlUsd: number | null;
+    startTotalPnl: number | null;
+    endTotalPnl: number | null;
+    startEquity: number | null;
+    endEquity: number | null;
+    snapshotsInWindow: number;
+  }[];
+  range: { from: string; to: string };
+}
+
+export interface FundingOverviewResponse {
+  rows: {
+    mmSlug: string;
+    displayName: string;
+    totalPaymentUsd: number | null;
+    rowCount: number;
+  }[];
+}
+
+export interface FundingMmResponse {
+  mmSlug: string;
+  displayName: string;
+  totalPaymentUsd: number | null;
+  rowCount: number;
+  byTicker: {
+    ticker: string;
+    paymentUsd: number | null;
+    rowCount: number;
+  }[];
+  range: { from: string; to: string };
 }

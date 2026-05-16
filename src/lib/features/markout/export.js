@@ -13,6 +13,8 @@ const CSV_HEADERS = [
   'fills',
   'avg_fill_size',
   'tickers',
+  'total_pnl',
+  'net_funding',
   'total_volume',
   'maker_vol_pct',
   'maker_taker_ratio',
@@ -46,6 +48,8 @@ function toCsvFields(row, view) {
     row.fills,
     row.avgOrderSize,
     row.tickerCount,
+    row.totalPnl,
+    row.netFunding,
     row.totalVolume,
     row.makerVolPct,
     row.makerTakerRatio,
@@ -77,6 +81,7 @@ const TICKER_CSV_HEADERS = [
   'ticker',
   'fills',
   'avg_fill_size',
+  'net_funding',
   ...MARKOUT_HORIZONS.map((horizon) => `${horizon}_pnl`)
 ];
 
@@ -91,7 +96,7 @@ function toTickerCsvFields(row, view, mmName) {
   for (const horizon of MARKOUT_HORIZONS) {
     horizonValues.push(row.horizons[horizon]);
   }
-  return [view, mmName, row.ticker, row.fills, row.avgOrderSize, ...horizonValues];
+  return [view, mmName, row.ticker, row.fills, row.avgOrderSize, row.netFunding, ...horizonValues];
 }
 
 /**

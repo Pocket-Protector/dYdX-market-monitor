@@ -12,6 +12,25 @@ const MarkoutRangeSchema = z.object({
 
 const HorizonsSchema = z.record(z.string(), z.number().nullable());
 
+const ApiEnvelopeMetaSchema = z
+  .object({
+    endpoint: z.string().optional(),
+    notes: z.array(z.string()).optional(),
+    warnings: z.array(z.string()).optional(),
+    from: z.string().optional(),
+    to: z.string().optional(),
+    code: z.string().optional()
+  })
+  .passthrough();
+
+export function ApiEnvelopeSchema<T extends z.ZodType>(dataSchema: T) {
+  return z.object({
+    meta: ApiEnvelopeMetaSchema,
+    data: dataSchema.nullable(),
+    error: z.string().nullable()
+  });
+}
+
 export const MarkoutMetaSchema = z.object({
   views: z.array(z.object({ key: ViewKeySchema, label: z.string() })),
   horizons: z.array(HorizonKeySchema),
@@ -89,4 +108,67 @@ export const MarkoutMmResponseSchema = z.object({
       })
       .passthrough()
   )
+});
+
+export const PnlOverviewResponseSchema = z.object({
+  rows: z.array(
+    z.object({
+      mmSlug: z.string(),
+      displayName: z.string(),
+      periodPnlUsd: z.number().nullable(),
+      startTotalPnl: z.number().nullable(),
+      endTotalPnl: z.number().nullable(),
+      walletCount: z.number()
+    })
+  )
+});
+
+export const PnlMmResponseSchema = z.object({
+  mmSlug: z.string(),
+  displayName: z.string(),
+  periodPnlUsd: z.number().nullable(),
+  startTotalPnl: z.number().nullable(),
+  endTotalPnl: z.number().nullable(),
+  startEquity: z.number().nullable(),
+  endEquity: z.number().nullable(),
+  netTransfersDelta: z.number().nullable(),
+  byWallet: z.array(
+    z.object({
+      address: z.string(),
+      subaccountNumber: z.number(),
+      periodPnlUsd: z.number().nullable(),
+      startTotalPnl: z.number().nullable(),
+      endTotalPnl: z.number().nullable(),
+      startEquity: z.number().nullable(),
+      endEquity: z.number().nullable(),
+      snapshotsInWindow: z.number()
+    })
+  ),
+  range: z.object({ from: z.string(), to: z.string() })
+});
+
+export const FundingOverviewResponseSchema = z.object({
+  rows: z.array(
+    z.object({
+      mmSlug: z.string(),
+      displayName: z.string(),
+      totalPaymentUsd: z.number().nullable(),
+      rowCount: z.number()
+    })
+  )
+});
+
+export const FundingMmResponseSchema = z.object({
+  mmSlug: z.string(),
+  displayName: z.string(),
+  totalPaymentUsd: z.number().nullable(),
+  rowCount: z.number(),
+  byTicker: z.array(
+    z.object({
+      ticker: z.string(),
+      paymentUsd: z.number().nullable(),
+      rowCount: z.number()
+    })
+  ),
+  range: z.object({ from: z.string(), to: z.string() })
 });

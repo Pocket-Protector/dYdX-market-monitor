@@ -25,4 +25,5 @@ vite.config.ts.timestamp-*
 # Claude
 .claude
 .playwright-mcp
+.codex-vite*.log
 /docs

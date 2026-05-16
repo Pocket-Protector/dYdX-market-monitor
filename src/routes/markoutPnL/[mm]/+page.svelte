@@ -39,17 +39,36 @@
   // SvelteKit re-runs whenever the URL params change.
   const mmData = $derived(data.mmData);
   const mmError = $derived(data.mmError);
+  const pnlData = $derived(data.pnlData);
+  const pnlError = $derived(data.pnlError);
+  const fundingData = $derived(data.fundingData);
+  const fundingError = $derived(data.fundingError);
+  const TOTAL_PNL_TOOLTIP =
+    'Trading performance for the selected date range. Deposits and withdrawals are removed.';
+  const NET_FUNDING_TOOLTIP =
+    'Funding for the selected date range. Positive means received; negative means paid.';
+
+  const detailRows = $derived.by(() => {
+    if (!mmData) return [];
+    const fundingByTicker = new Map(
+      (fundingData?.byTicker ?? []).map((row) => [row.ticker, row.paymentUsd])
+    );
+    return mmData.detailRows.map((row) => ({
+      ...row,
+      netFunding: fundingByTicker.get(row.ticker) ?? null
+    }));
+  });
 
   const showSkeleton = $derived(mmData === null && !mmError);
   const is404 = $derived(mmError === '404');
 
   const mmName = $derived(mmData ? mmData.mm.name : data.slug);
-  const hasDetailRows = $derived(mmData !== null && mmData.detailRows.length > 0);
+  const hasDetailRows = $derived(detailRows.length > 0);
 
   const horizonChartSeries = $derived.by(() => {
     if (!mmData) return [];
-    if (mmData.detailRows.length > 0) {
-      return mmData.detailRows.map((row, i) => ({
+    if (detailRows.length > 0) {
+      return detailRows.map((row, i) => ({
         key: row.ticker,
         label: row.ticker,
         color: COLORS[i % COLORS.length],
@@ -75,8 +94,13 @@
   // Capture table range on first mount for the back-link.
   // After the range selector clears tableFrom/tableTo from the URL, data.tableFrom
   // becomes null — but the back-link should still return to the original global range.
-  const initialTableFrom = data.tableFrom;
-  const initialTableTo = data.tableTo;
+  let initialTableFrom = $state<string | null>(null);
+  let initialTableTo = $state<string | null>(null);
+
+  $effect(() => {
+    if (initialTableFrom === null && data.tableFrom) initialTableFrom = data.tableFrom;
+    if (initialTableTo === null && data.tableTo) initialTableTo = data.tableTo;
+  });
 
   const backHref = $derived.by(() => {
     const params = new URLSearchParams({ view });
@@ -101,9 +125,32 @@
     return Math.floor((end - start) / 86_400_000) + 1;
   });
 
+  const pnlFundingRows = [
+    {
+      label: 'Total PnL',
+      value:
+        'Shows trading performance for the selected date range after removing deposits and withdrawals.'
+    },
+    {
+      label: 'Transfers',
+      value:
+        'Transfers in and out are removed, so moving money between wallets is not counted as profit or loss.'
+    },
+    {
+      label: 'Net Funding',
+      value:
+        'Shows funding over the selected date range. Positive means received funding; negative means paid funding.'
+    },
+    {
+      label: 'Relationship',
+      value:
+        'Funding is already part of Total PnL. Do not add Net Funding on top of Total PnL.'
+    }
+  ];
+
   function downloadTickerTableCsv() {
-    if (!mmData || mmData.detailRows.length === 0) return;
-    const csv = buildMarkoutTickerCsv(mmData.detailRows, view, mmData.mm.name);
+    if (!mmData || detailRows.length === 0) return;
+    const csv = buildMarkoutTickerCsv(detailRows, view, mmData.mm.name);
     const filename = buildMarkoutTickerCsvFilename(mmData.mm.slug, view);
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
@@ -147,7 +194,46 @@
       MM not found: <span class="font-medium">{data.slug}</span>
     </div>
   {:else}
-    <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+    <details class="mb-6 overflow-hidden rounded-xl border border-zinc-800 bg-zinc-900/75" open={false}>
+      <summary class="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 marker:hidden sm:px-5">
+        <div>
+          <div class="flex items-center gap-2">
+            <div class="h-2.5 w-2.5 rounded-full bg-sky-400"></div>
+            <h2 class="text-sm font-semibold text-zinc-100">PnL And Funding</h2>
+          </div>
+          <p class="mt-1 text-sm leading-5 text-zinc-400">
+            Quick context for the Total PnL card and Net Funding column.
+          </p>
+        </div>
+        <span class="rounded-full border border-zinc-700 bg-zinc-950 px-2.5 py-1 text-[11px] text-zinc-300">
+          Expand
+        </span>
+      </summary>
+      <div class="border-t border-zinc-800 px-4 py-4 sm:px-5">
+        <div class="grid gap-3 md:grid-cols-4">
+          {#each pnlFundingRows as row}
+            <div class="rounded-lg border border-zinc-800/80 bg-zinc-950/40 p-3">
+              <div class="text-[11px] font-medium uppercase tracking-[0.14em] text-zinc-500">
+                {row.label}
+              </div>
+              <p class="mt-2 text-sm leading-5 text-zinc-300">{row.value}</p>
+            </div>
+          {/each}
+        </div>
+      </div>
+    </details>
+
+    {#if pnlError || fundingError}
+      <div class="mb-4 rounded-xl border border-amber-500/25 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
+        Markout data loaded, but {pnlError && fundingError
+          ? 'PnL and funding data are'
+          : pnlError
+            ? 'PnL data is'
+            : 'funding data is'} unavailable for this range. Affected values are shown as -.
+      </div>
+    {/if}
+
+    <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
       <div class="rounded-xl border border-zinc-800 bg-zinc-900/60 p-4">
         <div class="text-[11px] uppercase tracking-wide text-zinc-500">Total fills</div>
         <div class="mt-1 text-lg font-semibold text-zinc-100">
@@ -169,6 +255,34 @@
         <div class="mt-1 text-lg font-semibold text-zinc-100">
           {mmData?.summaryRow.makerVolPct !== null && mmData?.summaryRow.makerVolPct !== undefined
             ? formatPct(mmData.summaryRow.makerVolPct)
+            : '—'}
+        </div>
+      </div>
+      <div class="rounded-xl border border-zinc-800 bg-zinc-900/60 p-4" title={TOTAL_PNL_TOOLTIP}>
+        <div class="text-[11px] uppercase tracking-wide text-zinc-500">Total PnL</div>
+        <div
+          class="mt-1 text-lg font-semibold {pnlData?.periodPnlUsd === null || pnlData?.periodPnlUsd === undefined
+            ? 'text-zinc-500'
+            : pnlData.periodPnlUsd >= 0
+              ? 'text-emerald-300'
+              : 'text-red-300'}"
+        >
+          {pnlData?.periodPnlUsd !== null && pnlData?.periodPnlUsd !== undefined
+            ? formatUsd(pnlData.periodPnlUsd)
+            : '—'}
+        </div>
+      </div>
+      <div class="rounded-xl border border-zinc-800 bg-zinc-900/60 p-4" title={NET_FUNDING_TOOLTIP}>
+        <div class="text-[11px] uppercase tracking-wide text-zinc-500">Net Funding</div>
+        <div
+          class="mt-1 text-lg font-semibold {fundingData?.totalPaymentUsd === null || fundingData?.totalPaymentUsd === undefined
+            ? 'text-zinc-500'
+            : fundingData.totalPaymentUsd >= 0
+              ? 'text-emerald-300'
+              : 'text-red-300'}"
+        >
+          {fundingData?.totalPaymentUsd !== null && fundingData?.totalPaymentUsd !== undefined
+            ? formatUsd(fundingData.totalPaymentUsd)
             : '—'}
         </div>
       </div>
@@ -242,13 +356,14 @@
                   <th class="px-4 py-3">Ticker</th>
                   <th class="px-4 py-3 text-right">Fills</th>
                   <th class="px-4 py-3 text-right">Avg Fill Size</th>
+                  <th class="px-4 py-3 text-right" title={NET_FUNDING_TOOLTIP}>Net Funding</th>
                   {#each MARKOUT_HORIZONS as h}
                     <th class="px-4 py-3 text-right">{h} PnL</th>
                   {/each}
                 </tr>
               </thead>
               <tbody>
-                {#each mmData!.detailRows as row}
+                {#each detailRows as row}
                   <tr class="border-b border-zinc-800/70 transition-colors hover:bg-zinc-800/30">
                     <td class="px-4 py-3 font-medium text-zinc-100">{row.ticker}</td>
                     <td class="mono px-4 py-3 text-right text-zinc-300">
@@ -256,6 +371,16 @@
                     </td>
                     <td class="mono px-4 py-3 text-right text-zinc-100">
                       {row.avgOrderSize !== null ? formatUsd(row.avgOrderSize) : '—'}
+                    </td>
+                    <td
+                      title={NET_FUNDING_TOOLTIP}
+                      class="mono px-4 py-3 text-right {row.netFunding === null || row.netFunding === undefined
+                        ? 'text-zinc-600'
+                        : row.netFunding >= 0
+                          ? 'text-emerald-300'
+                          : 'text-red-300'}"
+                    >
+                      {row.netFunding !== null && row.netFunding !== undefined ? formatUsd(row.netFunding) : '—'}
                     </td>
                     {#each MARKOUT_HORIZONS as h}
                       {@const val = row.horizons[h]}
