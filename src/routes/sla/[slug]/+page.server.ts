@@ -1,3 +1,4 @@
+import { error } from '@sveltejs/kit';
 import type { PageServerLoad } from './$types';
 import { apiFetch } from '$lib/api/client';
 import type { SlaMmMetaResponse } from '$lib/features/sla/types';
@@ -9,7 +10,12 @@ function subDays(dateStr: string, n: number): string {
 }
 
 export const load: PageServerLoad = async ({ params }) => {
-  const raw = (await apiFetch(`/api/sla/${params.slug}`)) as { data: SlaMmMetaResponse };
+  let raw: { data: SlaMmMetaResponse };
+  try {
+    raw = (await apiFetch(`/api/sla/${params.slug}`, undefined, { cacheTtlMs: 5 * 60_000 })) as { data: SlaMmMetaResponse };
+  } catch {
+    throw error(503, 'Backend temporarily unavailable — please try again in a moment.');
+  }
   const { displayName, firstTrackingDate, latestDataPoint, wallets } = raw.data;
 
   const today = new Date().toISOString().slice(0, 10);

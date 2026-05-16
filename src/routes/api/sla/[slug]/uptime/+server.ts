@@ -9,6 +9,10 @@ export const GET: RequestHandler = async ({ params, url, fetch }) => {
   const res = await fetch(upstream.toString());
   if (!res.ok) throw error(res.status);
   const body = await res.json();
-  if (body.error) throw error(400, body.error);
-  return json(SlaUptimeResponseSchema.parse(body.data));
+  if (body.error) throw error(503, body.error);
+  try {
+    return json(SlaUptimeResponseSchema.parse(body.data));
+  } catch {
+    throw error(502, 'Unexpected response shape from upstream');
+  }
 };

@@ -1,3 +1,4 @@
+import { error } from '@sveltejs/kit';
 import type { PageServerLoad } from './$types';
 import { apiFetch } from '$lib/api/client';
 import type { SlaLandingResponse } from '$lib/features/sla/types';
@@ -14,7 +15,12 @@ export const load: PageServerLoad = async ({ url }) => {
   const from = url.searchParams.get('from') ?? defaultFrom;
   const to = url.searchParams.get('to') ?? today;
 
-  const raw = (await apiFetch('/api/sla', { from, to })) as { data: SlaLandingResponse };
+  let raw: { data: SlaLandingResponse };
+  try {
+    raw = (await apiFetch('/api/sla', { from, to }, { cacheTtlMs: 5 * 60_000 })) as { data: SlaLandingResponse };
+  } catch {
+    throw error(503, 'Backend temporarily unavailable — please try again in a moment.');
+  }
   const rows = raw.data.rows;
 
   const minDate = rows.reduce(

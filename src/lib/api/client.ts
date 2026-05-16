@@ -7,9 +7,11 @@ interface CacheEntry {
 
 interface ApiFetchOptions {
   bypassCache?: boolean;
+  cacheTtlMs?: number;
 }
 
 const CACHE_TTL_MS = 8_000;
+const FETCH_TIMEOUT_MS = 28_000;
 const MAX_CACHE_ITEMS = 250;
 
 const responseCache = new Map<string, CacheEntry>();
@@ -46,7 +48,7 @@ export async function apiFetch(
   const key = url.toString();
 
   if (options.bypassCache) {
-    const res = await fetch(key, { signal: AbortSignal.timeout(20_000) });
+    const res = await fetch(key, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
     if (!res.ok) {
       throw new Error(`API ${res.status}: ${await res.text()}`);
     }
@@ -62,13 +64,14 @@ export async function apiFetch(
   if (pending) return pending;
 
   const request = (async () => {
-    const res = await fetch(key, { signal: AbortSignal.timeout(20_000) });
+    const res = await fetch(key, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
     if (!res.ok) {
       throw new Error(`API ${res.status}: ${await res.text()}`);
     }
 
     const payload = await res.json();
-    const expiry = Date.now() + CACHE_TTL_MS;
+    const ttl = options.cacheTtlMs ?? CACHE_TTL_MS;
+    const expiry = Date.now() + ttl;
     responseCache.set(key, { value: payload, expiresAt: expiry });
     pruneCache(Date.now());
     return payload;
