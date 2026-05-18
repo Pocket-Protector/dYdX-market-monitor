@@ -21,6 +21,8 @@
     'Trading performance for the selected date range. Deposits and withdrawals are removed.';
   const NET_FUNDING_TOOLTIP =
     'Funding for the selected date range. Positive means received; negative means paid.';
+  const EXPECTED_PNL_TOOLTIP =
+    '10s markout PnL plus net funding. Combines short-horizon trading edge with funding earned or paid.';
 
   const coloredRows = $derived(
     data.initialOverview.rows.map((row) => ({
@@ -45,6 +47,7 @@
     | 'tickerCount'
     | 'totalPnl'
     | 'netFunding'
+    | 'expectedPnl'
     | 'totalVolume'
     | 'makerVolPct'
     | 'makerTakerRatio'
@@ -62,10 +65,18 @@
     }
   }
 
+  function getExpectedPnl(row: (typeof coloredRows)[number]): number | null {
+    const h10 = row.horizons['10s'];
+    const funding = row.netFunding ?? null;
+    if (h10 === null || h10 === undefined || funding === null || funding === undefined) return null;
+    return h10 + funding;
+  }
+
   function sortValue(row: (typeof coloredRows)[number]): number | string {
     if (sortCol === 'name') return row.name;
     if (sortCol === '5s') return row.horizons['5s'] ?? -Infinity;
     if (sortCol === 'makerTakerRatio') return row.makerTakerRatio ?? -Infinity;
+    if (sortCol === 'expectedPnl') return getExpectedPnl(row) ?? -Infinity;
     return (row[sortCol] as number | null) ?? -Infinity;
   }
 
@@ -359,6 +370,16 @@
             <th class="px-4 py-3 text-right">
               <button
                 type="button"
+                title={EXPECTED_PNL_TOOLTIP}
+                onclick={() => toggleSort('expectedPnl')}
+                class="hover:text-zinc-300"
+              >
+                Expected PnL {sortIndicator('expectedPnl')}
+              </button>
+            </th>
+            <th class="px-4 py-3 text-right">
+              <button
+                type="button"
                 onclick={() => toggleSort('totalVolume')}
                 class="hover:text-zinc-300"
               >
@@ -440,6 +461,16 @@
                     : 'text-red-300'}"
               >
                 {row.netFunding !== null && row.netFunding !== undefined ? formatUsd(row.netFunding) : '—'}
+              </td>
+              <td
+                title={EXPECTED_PNL_TOOLTIP}
+                class="mono px-4 py-3 text-right {getExpectedPnl(row) === null
+                  ? 'text-zinc-600'
+                  : getExpectedPnl(row)! >= 0
+                    ? 'text-emerald-300'
+                    : 'text-red-300'}"
+              >
+                {getExpectedPnl(row) !== null ? formatUsd(getExpectedPnl(row)!) : '—'}
               </td>
               <td class="mono px-4 py-3 text-right text-zinc-100">
                 {row.totalVolume !== null ? formatUsd(row.totalVolume) : '—'}
