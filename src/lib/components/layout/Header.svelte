@@ -2,6 +2,7 @@
   import { page } from '$app/stores';
 
   const onMarkets = $derived($page.url.pathname.startsWith('/markets'));
+  const onOverview = $derived($page.url.pathname.startsWith('/overview'));
   const onMarkout = $derived($page.url.pathname.startsWith('/markoutPnL'));
   const onSla = $derived($page.url.pathname.startsWith('/sla'));
 </script>
@@ -48,6 +49,18 @@
       >
         MM SLA
         {#if onSla}
+          <span class="absolute bottom-0 left-3 right-3 h-[2px] rounded-t-full bg-violet-500"></span>
+        {/if}
+      </a>
+      <a
+        href="/overview"
+        data-sveltekit-preload-data="hover"
+        class="relative flex items-center px-3 text-[13px] transition-colors {onOverview
+          ? 'text-zinc-100'
+          : 'text-zinc-500 hover:text-zinc-300'}"
+      >
+        Overview
+        {#if onOverview}
           <span class="absolute bottom-0 left-3 right-3 h-[2px] rounded-t-full bg-violet-500"></span>
         {/if}
       </a>
