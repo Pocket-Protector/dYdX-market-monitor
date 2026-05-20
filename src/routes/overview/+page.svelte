@@ -6,6 +6,12 @@
   import LoadingSpinner from '$lib/shared/components/LoadingSpinner.svelte';
   import ErrorBanner from '$lib/shared/components/ErrorBanner.svelte';
   import { shortTicker } from '$lib/utils/format';
+  import type {
+    MmQuotesOverviewResponse,
+    MmQuotesDetailResponse,
+    MmQuotesDetailMm,
+    MmQuotesDetailTicker
+  } from '$lib/features/mm-quotes/types';
 
   interface ExchangeVolume {
     exchangeId: string;
@@ -43,6 +49,10 @@
     trending24h: boolean;
     trending7d: boolean;
     hasCoinGeckoContext: boolean;
+    mmsQuoting: number | null;
+    totalMmLiquidityUsd: number | null;
+    mmMakerVolumeUsd24h: number | null;
+    mmTakerVolumeUsd24h: number | null;
   }
 
   interface OverviewResponse {
@@ -91,7 +101,10 @@
     maxExternalVolume: string;
     trending24hFilter: TrendFilter;
     trending7dFilter: TrendFilter;
+    selectedMmFilters: string[];
   };
+
+  const MM_FILTER_NONE = '__none__';
 
   const COLUMNS_STORAGE_KEY = 'overview.visibleColumns.v1';
   const FILTERS_STORAGE_KEY = 'overview.filters.v1';
@@ -110,8 +123,6 @@
   ];
 
   const pendingColumns = [
-    { id: 'pending:mmsQuoting' as ColumnId, label: 'MMs Quoting', short: 'MMs' },
-    { id: 'pending:totalMmLiquidity' as ColumnId, label: 'Total MM Liq', short: 'MM Liq' },
     { id: 'pending:spread14d' as ColumnId, label: 'Spread 14d', short: 'Spr 14d' },
     { id: 'pending:spread24hDelta' as ColumnId, label: 'Spread 24h + Delta', short: 'Spr 24h' },
     { id: 'pending:depth14d' as ColumnId, label: 'Depth 14d', short: 'Dpt 14d' },
@@ -128,6 +139,8 @@
     { key: 'volume24h' as SortKey, label: 'Vol 24h', align: 'right' as const, title: 'Live 24h dYdX notional volume.' },
     { key: 'volumeZScore' as SortKey, label: 'Vol Z', align: 'right' as const, title: 'Robust z-score: live 24h dYdX volume versus 7-snapshot median baseline.' },
     { key: 'openInterestNotional' as SortKey, label: 'Open Interest', align: 'right' as const, title: 'openInterest multiplied by oraclePrice.' },
+    { key: 'mmsQuoting' as SortKey, label: 'MMs', align: 'right' as const, title: 'Distinct tracked MM groups with at least one two-sided minute on this ticker in the last 24h.' },
+    { key: 'totalMmLiquidityUsd' as SortKey, label: 'MM Liq', align: 'right' as const, title: 'Sum over MMs of (medianBidUsd + medianAskUsd) — typical total depth when each MM is on. Last 24h.' },
     { key: 'listedOnCount' as SortKey, label: 'Listed On', align: 'right' as const, title: 'Tracked derivative exchanges listing this ticker.' },
     { key: 'avgVolPerExchangeUsd' as SortKey, label: 'Avg Vol / Exch', align: 'right' as const, title: 'CoinGecko tracked perp volume divided by listed exchange count.' },
     { key: 'totalExternalVolumeUsd' as SortKey, label: 'External Vol', align: 'right' as const, title: 'Total CoinGecko tracked perp volume across listed venues.' },
@@ -141,13 +154,13 @@
     volume24h: true,
     volumeZScore: false,
     openInterestNotional: true,
+    mmsQuoting: true,
+    totalMmLiquidityUsd: true,
     listedOnCount: true,
     avgVolPerExchangeUsd: false,
     totalExternalVolumeUsd: false,
     trending24h: true,
     trending7d: false,
-    'pending:mmsQuoting': false,
-    'pending:totalMmLiquidity': false,
     'pending:spread14d': false,
     'pending:spread24hDelta': false,
     'pending:depth14d': false,
@@ -164,6 +177,8 @@
     volume24h: '88px',
     volumeZScore: '66px',
     openInterestNotional: '104px',
+    mmsQuoting: '58px',
+    totalMmLiquidityUsd: '88px',
     listedOnCount: '72px',
     avgVolPerExchangeUsd: '104px',
     totalExternalVolumeUsd: '102px',
@@ -178,6 +193,7 @@
   let sortKey = $state<SortKey>('openInterestNotional');
   let sortDir = $state<'asc' | 'desc'>('desc');
   let openVenueTicker = $state<string | null>(null);
+  let openMmTicker = $state<string | null>(null);
   let refreshing = $state(false);
   let showColumnMenu = $state(false);
   let showFilterMenu = $state(false);
@@ -196,11 +212,76 @@
   let maxExternalVolume = $state('');
   let trending24hFilter = $state<TrendFilter>('any');
   let trending7dFilter = $state<TrendFilter>('any');
+  let selectedMmFilters = $state<string[]>([]);
+  let showMmFilterMenu = $state(false);
+  let mmFilterSearch = $state('');
   let preferencesLoaded = $state(false);
 
   const { data, error, isLoading, revalidate } = useSWR<OverviewResponse>(() => '/api/overview');
+  const { data: mmQuotesData, revalidate: revalidateMmQuotes } = useSWR<MmQuotesOverviewResponse>(
+    () => '/api/mm-quotes/overview',
+    { refreshInterval: 60_000 }
+  );
+  const { data: mmDetailData, isLoading: mmDetailLoading, error: mmDetailError } = useSWR<MmQuotesDetailResponse>(
+    () => '/api/mm-quotes/detail',
+    { refreshInterval: 60_000, dedupingInterval: 30_000 }
+  );
 
-  const rows = $derived($data?.data.rows ?? []);
+  const mmDetailByTicker = $derived.by(() => {
+    const map = new Map<string, MmQuotesDetailTicker>();
+    for (const t of $mmDetailData?.data?.tickers ?? []) map.set(t.ticker, t);
+    return map;
+  });
+
+  const allMms = $derived.by(() => {
+    const seen = new Map<string, { slug: string; name: string }>();
+    for (const t of $mmDetailData?.data?.tickers ?? []) {
+      for (const mm of t.mms) {
+        if (!seen.has(mm.mmSlug)) seen.set(mm.mmSlug, { slug: mm.mmSlug, name: mm.displayName });
+      }
+    }
+    return [...seen.values()].sort((a, b) => a.name.localeCompare(b.name));
+  });
+
+  const tickerMmSlugs = $derived.by(() => {
+    const map = new Map<string, Set<string>>();
+    for (const t of $mmDetailData?.data?.tickers ?? []) {
+      map.set(t.ticker, new Set(t.mms.map((m) => m.mmSlug)));
+    }
+    return map;
+  });
+
+  const filteredMmFilterOptions = $derived.by(() => {
+    const q = mmFilterSearch.trim().toLowerCase();
+    if (!q) return allMms;
+    return allMms.filter((m) => m.name.toLowerCase().includes(q) || m.slug.toLowerCase().includes(q));
+  });
+
+  const mmQuotesByTicker = $derived.by(() => {
+    const map = new Map<string, { mmsCount: number; totalQuotedUsd: number; makerVolumeUsd: number; takerVolumeUsd: number }>();
+    for (const t of $mmQuotesData?.data?.tickers ?? []) {
+      map.set(t.ticker, {
+        mmsCount: t.mmsCount,
+        totalQuotedUsd: t.totalQuotedUsd,
+        makerVolumeUsd: t.totalMakerVolumeUsd24h,
+        takerVolumeUsd: t.totalTakerVolumeUsd24h
+      });
+    }
+    return map;
+  });
+
+  const rows = $derived(
+    ($data?.data.rows ?? []).map((row) => {
+      const mmq = mmQuotesByTicker.get(row.ticker);
+      return {
+        ...row,
+        mmsQuoting: mmq?.mmsCount ?? null,
+        totalMmLiquidityUsd: mmq?.totalQuotedUsd ?? null,
+        mmMakerVolumeUsd24h: mmq?.makerVolumeUsd ?? null,
+        mmTakerVolumeUsd24h: mmq?.takerVolumeUsd ?? null
+      } as OverviewRow;
+    })
+  );
   const meta = $derived($data?.meta);
   const visibleDataColumns = $derived(columns.filter((col) => visibleColumns[col.key] !== false));
   const visiblePendingColumns = $derived(pendingColumns.filter((col) => visibleColumns[col.id]));
@@ -248,6 +329,14 @@
     if (trending24hFilter !== 'any') labels.push(`Trend 24h: ${trending24hFilter}`);
     if (trending7dFilter !== 'any') labels.push(`Trend 7d: ${trending7dFilter}`);
 
+    if (selectedMmFilters.length > 0) {
+      const names = selectedMmFilters.map((v) => {
+        if (v === MM_FILTER_NONE) return '(No MMs)';
+        return allMms.find((m) => m.slug === v)?.name ?? v;
+      });
+      labels.push(`MMs: ${names.join(', ')}`);
+    }
+
     return labels;
   });
 
@@ -277,6 +366,9 @@
       maxExternalVolume = savedFilters.maxExternalVolume ?? maxExternalVolume;
       trending24hFilter = isTrendFilter(savedFilters.trending24hFilter) ? savedFilters.trending24hFilter : trending24hFilter;
       trending7dFilter = isTrendFilter(savedFilters.trending7dFilter) ? savedFilters.trending7dFilter : trending7dFilter;
+      if (Array.isArray(savedFilters.selectedMmFilters)) {
+        selectedMmFilters = savedFilters.selectedMmFilters.filter((v) => typeof v === 'string');
+      }
     }
 
     preferencesLoaded = true;
@@ -295,7 +387,7 @@
   async function handleRefresh() {
     refreshing = true;
     const minDelay = new Promise((resolve) => setTimeout(resolve, 350));
-    await Promise.all([revalidate(), minDelay]);
+    await Promise.all([revalidate(), revalidateMmQuotes(), minDelay]);
     refreshing = false;
   }
 
@@ -345,8 +437,20 @@
       minExternalVolume,
       maxExternalVolume,
       trending24hFilter,
-      trending7dFilter
+      trending7dFilter,
+      selectedMmFilters
     };
+  }
+
+  function toggleMmFilter(value: string) {
+    selectedMmFilters = selectedMmFilters.includes(value)
+      ? selectedMmFilters.filter((v) => v !== value)
+      : [...selectedMmFilters, value];
+  }
+
+  function clearMmFilters() {
+    selectedMmFilters = [];
+    mmFilterSearch = '';
   }
 
   function toggleColumn(id: ColumnId) {
@@ -424,6 +528,19 @@
     if (marketTypeFilter !== 'all') result = result.filter((row) => row.marketType === marketTypeFilter);
     if (contextFilter === 'with-context') result = result.filter((row) => row.hasCoinGeckoContext);
     if (contextFilter === 'without-context') result = result.filter((row) => !row.hasCoinGeckoContext);
+
+    if (selectedMmFilters.length > 0) {
+      const wantNone = selectedMmFilters.includes(MM_FILTER_NONE);
+      const wantSlugs = selectedMmFilters.filter((s) => s !== MM_FILTER_NONE);
+      result = result.filter((row) => {
+        const mms = tickerMmSlugs.get(row.ticker);
+        const hasNoMms = !mms || mms.size === 0;
+        if (wantNone && hasNoMms) return true;
+        if (wantSlugs.length > 0 && mms && wantSlugs.some((s) => mms.has(s))) return true;
+        return false;
+      });
+    }
+
     result = result.filter(
       (row) =>
         matchesRange(row.volume24h, minVolume24h, maxVolume24h) &&
@@ -518,6 +635,37 @@
 
   function toggleVenueTable(row: OverviewRow) {
     openVenueTicker = openVenueTicker === row.ticker ? null : row.ticker;
+  }
+
+  function toggleMmTable(row: OverviewRow) {
+    if (row.mmsQuoting == null) return;
+    openMmTicker = openMmTicker === row.ticker ? null : row.ticker;
+  }
+
+  function formatUptime(value: number | null | undefined): string {
+    if (value == null) return '-';
+    return `${value.toFixed(1)}%`;
+  }
+
+  function uptimeClass(value: number | null | undefined): string {
+    if (value == null) return 'text-zinc-500';
+    if (value >= 95) return 'text-emerald-300';
+    if (value >= 75) return 'text-amber-300';
+    if (value >= 50) return 'text-orange-300';
+    return 'text-red-300';
+  }
+
+  function mmShare(mm: MmQuotesDetailMm, ticker: MmQuotesDetailTicker): number | null {
+    if (ticker.totalQuotedUsd <= 0) return null;
+    return (mm.totalQuotedUsd / ticker.totalQuotedUsd) * 100;
+  }
+
+  function bidAskSplitPct(mm: MmQuotesDetailMm): { bid: number; ask: number } | null {
+    const bid = mm.bidQuotedUsd ?? 0;
+    const ask = mm.askQuotedUsd ?? 0;
+    const total = bid + ask;
+    if (total <= 0) return null;
+    return { bid: (bid / total) * 100, ask: (ask / total) * 100 };
   }
 
   function exchangeTitle(row: OverviewRow): string {
@@ -753,6 +901,68 @@
 
     <div class="relative">
       <button
+        class="overview-control rounded border border-zinc-700 bg-zinc-900 font-medium text-zinc-200 transition-colors hover:border-zinc-500 hover:bg-zinc-800 {selectedMmFilters.length > 0 ? 'border-violet-500/40 bg-violet-500/15 text-violet-300' : ''}"
+        onclick={() => (showMmFilterMenu = !showMmFilterMenu)}
+      >
+        MMs{selectedMmFilters.length > 0 ? ` (${selectedMmFilters.length})` : ''}
+      </button>
+
+      {#if showMmFilterMenu}
+        <div class="absolute left-0 top-full z-30 mt-2 w-72 overflow-hidden rounded-lg border border-zinc-700 bg-zinc-950 shadow-2xl shadow-black/50">
+          <div class="flex items-center justify-between border-b border-zinc-800 px-3 py-2">
+            <div>
+              <div class="text-xs font-semibold text-zinc-100">Filter by MM</div>
+              <div class="text-[11px] text-zinc-500">Show tickers quoted by any selected MM. Default shows all.</div>
+            </div>
+            <button class="text-[11px] font-medium text-violet-300 hover:text-violet-200 disabled:opacity-40" disabled={selectedMmFilters.length === 0} onclick={clearMmFilters}>Clear</button>
+          </div>
+
+          <div class="border-b border-zinc-800 px-2 py-2">
+            <input
+              type="text"
+              bind:value={mmFilterSearch}
+              placeholder="Search MM..."
+              class="w-full rounded border border-zinc-800 bg-zinc-900 px-2 py-1.5 text-xs text-zinc-200 focus:border-violet-500 focus:outline-none"
+            />
+          </div>
+
+          <div class="max-h-[360px] overflow-y-auto p-2">
+            <label class="flex cursor-pointer items-center justify-between rounded px-2 py-1.5 text-xs text-zinc-300 hover:bg-zinc-900/80">
+              <span class="italic text-zinc-400">(No MM data)</span>
+              <input
+                type="checkbox"
+                checked={selectedMmFilters.includes(MM_FILTER_NONE)}
+                onchange={() => toggleMmFilter(MM_FILTER_NONE)}
+                class="h-3.5 w-3.5 accent-violet-500"
+              />
+            </label>
+            {#if allMms.length === 0}
+              <div class="px-2 py-3 text-center text-[11px] text-zinc-500">Loading MM list...</div>
+            {:else if filteredMmFilterOptions.length === 0}
+              <div class="px-2 py-3 text-center text-[11px] text-zinc-500">No MMs match "{mmFilterSearch}".</div>
+            {:else}
+              {#each filteredMmFilterOptions as mm}
+                <label class="flex cursor-pointer items-center justify-between rounded px-2 py-1.5 text-xs text-zinc-300 hover:bg-zinc-900/80">
+                  <span class="flex items-center gap-2">
+                    <span>{mm.name}</span>
+                    <span class="text-[10px] text-zinc-600 mono">{mm.slug}</span>
+                  </span>
+                  <input
+                    type="checkbox"
+                    checked={selectedMmFilters.includes(mm.slug)}
+                    onchange={() => toggleMmFilter(mm.slug)}
+                    class="h-3.5 w-3.5 accent-violet-500"
+                  />
+                </label>
+              {/each}
+            {/if}
+          </div>
+        </div>
+      {/if}
+    </div>
+
+    <div class="relative">
+      <button
         class="overview-control rounded border border-zinc-700 bg-zinc-900 font-medium text-zinc-200 transition-colors hover:border-zinc-500 hover:bg-zinc-800"
         onclick={() => (showColumnMenu = !showColumnMenu)}
       >
@@ -886,6 +1096,30 @@
                         </span>
                       {:else if col.key === 'openInterestNotional'}
                         <span class="text-zinc-100 mono">{formatUsd(row.openInterestNotional)}</span>
+                      {:else if col.key === 'mmsQuoting'}
+                        {#if row.mmsQuoting == null}
+                          <span class="text-zinc-600 mono" title="No MM quote data for this ticker in the last 24h.">-</span>
+                        {:else}
+                          <button
+                            class="text-right text-zinc-200 underline-offset-2 hover:text-violet-300 hover:underline mono"
+                            title={`${row.mmsQuoting} MM group${row.mmsQuoting === 1 ? '' : 's'} quoted two-sided in the last 24h. Click for per-MM breakdown.`}
+                            onclick={() => toggleMmTable(row)}
+                          >
+                            {row.mmsQuoting}
+                          </button>
+                        {/if}
+                      {:else if col.key === 'totalMmLiquidityUsd'}
+                        {#if row.totalMmLiquidityUsd == null}
+                          <span class="text-zinc-600 mono" title="No MM quote data for this ticker in the last 24h.">-</span>
+                        {:else}
+                          <button
+                            class="text-right text-zinc-100 underline-offset-2 hover:text-violet-300 hover:underline mono"
+                            title={`Sum of typical depth across ${row.mmsQuoting ?? 0} MMs.\nMaker vol 24h: ${formatUsd(row.mmMakerVolumeUsd24h)}\nTaker vol 24h: ${formatUsd(row.mmTakerVolumeUsd24h)}\nClick for per-MM breakdown.`}
+                            onclick={() => toggleMmTable(row)}
+                          >
+                            {formatUsd(row.totalMmLiquidityUsd)}
+                          </button>
+                        {/if}
                       {:else if col.key === 'listedOnCount'}
                         <button
                           class="text-right text-zinc-200 underline-offset-2 hover:text-violet-300 hover:underline mono"
@@ -973,6 +1207,81 @@
                             </div>
                           </div>
                         {/each}
+                      </div>
+                    </td>
+                  </tr>
+                {/if}
+
+                {#if openMmTicker === row.ticker}
+                  {@const detail = mmDetailByTicker.get(row.ticker)}
+                  <tr class="border-b border-zinc-800/70 bg-zinc-800/30">
+                    <td colspan={visibleColumnCount} class="px-3 py-3">
+                      <div class="w-full overflow-hidden rounded border border-zinc-700/80 bg-zinc-800/25 shadow-2xl shadow-black/40">
+                        <div class="flex flex-wrap items-center justify-between gap-3 border-b border-zinc-800 bg-zinc-900/80 px-3 py-2">
+                          <div>
+                            <div class="text-xs font-semibold text-zinc-100 mono">{shortTicker(row.ticker)} MM liquidity</div>
+                            <div class="mt-0.5 text-[11px] text-zinc-500">
+                              {row.mmsQuoting ?? 0} MM group{(row.mmsQuoting ?? 0) === 1 ? '' : 's'} quoting two-sided in the last 24h
+                            </div>
+                          </div>
+                          <div class="grid grid-cols-3 gap-3 text-right text-[11px]">
+                            <div>
+                              <div class="text-zinc-500">Total quoted</div>
+                              <div class="text-zinc-200 mono">{formatUsd(row.totalMmLiquidityUsd)}</div>
+                            </div>
+                            <div>
+                              <div class="text-zinc-500">Maker vol</div>
+                              <div class="text-zinc-200 mono">{formatUsd(row.mmMakerVolumeUsd24h)}</div>
+                            </div>
+                            <div>
+                              <div class="text-zinc-500">Taker vol</div>
+                              <div class="text-zinc-200 mono">{formatUsd(row.mmTakerVolumeUsd24h)}</div>
+                            </div>
+                          </div>
+                        </div>
+
+                        {#if !detail}
+                          {#if $mmDetailError}
+                            <div class="px-3 py-4 text-center text-xs text-red-300">Failed to load MM breakdown.</div>
+                          {:else if $mmDetailLoading}
+                            <div class="px-3 py-4 text-center text-xs text-zinc-500">Loading per-MM breakdown...</div>
+                          {:else}
+                            <div class="px-3 py-4 text-center text-xs text-zinc-500">No per-MM breakdown available for this ticker.</div>
+                          {/if}
+                        {:else}
+                          <div class="grid grid-cols-[1.4fr_0.7fr_1fr_1fr_1fr_1fr_1fr_1.2fr] border-b border-zinc-800 bg-zinc-900/80 px-3 py-1.5 text-[11px] font-medium text-zinc-500">
+                            <div>MM</div>
+                            <div class="text-right" title="twoSidedMinutes / 1440">Uptime</div>
+                            <div class="text-right" title="Median bid depth across two-sided minutes (group-level)">Bid</div>
+                            <div class="text-right" title="Median ask depth across two-sided minutes (group-level)">Ask</div>
+                            <div class="text-right">Total Liq</div>
+                            <div class="text-right" title="Maker fill volume in the last 24h (all wallets+subs in the group)">Maker</div>
+                            <div class="text-right" title="Taker fill volume in the last 24h">Taker</div>
+                            <div class="pl-4 text-right">Share</div>
+                          </div>
+
+                          {#each detail.mms as mm}
+                            {@const share = mmShare(mm, detail)}
+                            {@const split = bidAskSplitPct(mm)}
+                            <div class="grid grid-cols-[1.4fr_0.7fr_1fr_1fr_1fr_1fr_1fr_1.2fr] items-center border-b border-zinc-800/60 px-3 py-1.5 text-xs text-zinc-300 last:border-b-0">
+                              <div class="truncate font-medium text-zinc-200 mono" title={mm.mmSlug}>{mm.displayName}</div>
+                              <div class="text-right mono {uptimeClass(mm.uptimePct)}" title={`${mm.twoSidedMinutes} / 1440 two-sided minutes`}>{formatUptime(mm.uptimePct)}</div>
+                              <div class="text-right text-zinc-200 mono" title={split ? `${split.bid.toFixed(0)}% of own quoted depth` : ''}>{formatUsd(mm.bidQuotedUsd)}</div>
+                              <div class="text-right text-zinc-200 mono" title={split ? `${split.ask.toFixed(0)}% of own quoted depth` : ''}>{formatUsd(mm.askQuotedUsd)}</div>
+                              <div class="text-right text-zinc-100 mono">{formatUsd(mm.totalQuotedUsd)}</div>
+                              <div class="text-right text-zinc-300 mono">{formatUsd(mm.makerVolumeUsd24h)}</div>
+                              <div class="text-right {mm.takerVolumeUsd24h > 0 ? 'text-amber-300' : 'text-zinc-500'} mono">{formatUsd(mm.takerVolumeUsd24h)}</div>
+                              <div class="pl-4">
+                                <div class="flex items-center gap-2">
+                                  <div class="h-1.5 flex-1 overflow-hidden rounded-full bg-zinc-800">
+                                    <div class="h-full rounded-full bg-violet-500" style={`width: ${Math.min(100, Math.max(0, share ?? 0))}%`}></div>
+                                  </div>
+                                  <span class="w-10 text-right text-[10px] text-zinc-400 mono">{formatShare(share)}</span>
+                                </div>
+                              </div>
+                            </div>
+                          {/each}
+                        {/if}
                       </div>
                     </td>
                   </tr>
