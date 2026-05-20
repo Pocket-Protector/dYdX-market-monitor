@@ -12,6 +12,7 @@
     MmQuotesDetailMm,
     MmQuotesDetailTicker
   } from '$lib/features/mm-quotes/types';
+  import type { PairDepthOverviewResponse, PairDepthOverviewTicker } from '$lib/features/pairdepth/types';
 
   interface ExchangeVolume {
     exchangeId: string;
@@ -53,6 +54,19 @@
     totalMmLiquidityUsd: number | null;
     mmMakerVolumeUsd24h: number | null;
     mmTakerVolumeUsd24h: number | null;
+    vol14dMedianUsd: number | null;
+    spread14dBps: number | null;
+    spread24hBps: number | null;
+    spreadDeltaPct: number | null;
+    depth100bps14dUsd: number | null;
+    depth100bps24hUsd: number | null;
+    depth100bpsDeltaPct: number | null;
+    slip10kBps14d: number | null;
+    slip10kBps24h: number | null;
+    slip10kDeltaPct: number | null;
+    slip100kBps14d: number | null;
+    slip100kBps24h: number | null;
+    slip100kDeltaPct: number | null;
   }
 
   interface OverviewResponse {
@@ -122,25 +136,22 @@
     { id: 'lighter', name: 'Lighter' }
   ];
 
-  const pendingColumns = [
-    { id: 'pending:spread14d' as ColumnId, label: 'Spread 14d', short: 'Spr 14d' },
-    { id: 'pending:spread24hDelta' as ColumnId, label: 'Spread 24h + Delta', short: 'Spr 24h' },
-    { id: 'pending:depth14d' as ColumnId, label: 'Depth 14d', short: 'Dpt 14d' },
-    { id: 'pending:depth24hDelta' as ColumnId, label: 'Depth 24h + Delta', short: 'Dpt 24h' },
-    { id: 'pending:slippage10k14d' as ColumnId, label: 'Slip $10K 14d', short: 'S10 14d' },
-    { id: 'pending:slippage10k24hDelta' as ColumnId, label: 'Slip $10K 24h + Delta', short: 'S10 24h' },
-    { id: 'pending:slippage100k14d' as ColumnId, label: 'Slip $100K 14d', short: 'S100 14d' },
-    { id: 'pending:slippage100k24hDelta' as ColumnId, label: 'Slip $100K 24h + Delta', short: 'S100 24h' }
-  ];
-
   const columns = [
     { key: 'marketType' as SortKey, label: 'Type', align: 'left' as const, title: 'dYdX margin mode.' },
     { key: 'ticker' as SortKey, label: 'Ticker', align: 'left' as const, title: 'Canonical dYdX market ticker.' },
-    { key: 'volume24h' as SortKey, label: 'Vol 24h', align: 'right' as const, title: 'Live 24h dYdX notional volume.' },
+    { key: 'vol14dMedianUsd' as SortKey, label: 'Vol 14d med', align: 'right' as const, title: '14-day median of daily 24h notional volume (from PairDepth daily_volume_group).' },
     { key: 'volumeZScore' as SortKey, label: 'Vol Z', align: 'right' as const, title: 'Robust z-score: live 24h dYdX volume versus 7-snapshot median baseline.' },
     { key: 'openInterestNotional' as SortKey, label: 'Open Interest', align: 'right' as const, title: 'openInterest multiplied by oraclePrice.' },
     { key: 'mmsQuoting' as SortKey, label: 'MMs', align: 'right' as const, title: 'Distinct tracked MM groups with at least one two-sided minute on this ticker in the last 24h.' },
     { key: 'totalMmLiquidityUsd' as SortKey, label: 'MM Liq', align: 'right' as const, title: 'Sum over MMs of (medianBidUsd + medianAskUsd) — typical total depth when each MM is on. Last 24h.' },
+    { key: 'spread14dBps' as SortKey, label: 'Spr 14d', align: 'right' as const, title: 'PairDepth: 14-day median of minute-level spread in bps. (best_ask - best_bid) / mid * 10000.' },
+    { key: 'spread24hBps' as SortKey, label: 'Spr 24h', align: 'right' as const, title: 'PairDepth: 24h median spread in bps with delta vs 14d. Positive delta = spreads widened recently (worse).' },
+    { key: 'depth100bps14dUsd' as SortKey, label: 'Dpt 14d', align: 'right' as const, title: 'PairDepth: 14-day median of quote-USD depth within 100 bps of mid (bid + ask).' },
+    { key: 'depth100bps24hUsd' as SortKey, label: 'Dpt 24h', align: 'right' as const, title: 'PairDepth: 24h median 100 bps depth with delta vs 14d. Positive delta = more liquidity recently (better).' },
+    { key: 'slip10kBps14d' as SortKey, label: 'S10K 14d', align: 'right' as const, title: 'PairDepth: 14-day median bps cost of a $10K market order vs mid.' },
+    { key: 'slip10kBps24h' as SortKey, label: 'S10K 24h', align: 'right' as const, title: 'PairDepth: 24h median $10K slippage in bps with delta vs 14d. Positive delta = slippage worsened (worse).' },
+    { key: 'slip100kBps14d' as SortKey, label: 'S100K 14d', align: 'right' as const, title: 'PairDepth: 14-day median bps cost of a $100K market order vs mid.' },
+    { key: 'slip100kBps24h' as SortKey, label: 'S100K 24h', align: 'right' as const, title: 'PairDepth: 24h median $100K slippage in bps with delta vs 14d. Positive delta = slippage worsened (worse).' },
     { key: 'listedOnCount' as SortKey, label: 'Listed On', align: 'right' as const, title: 'Tracked derivative exchanges listing this ticker.' },
     { key: 'avgVolPerExchangeUsd' as SortKey, label: 'Avg Vol / Exch', align: 'right' as const, title: 'CoinGecko tracked perp volume divided by listed exchange count.' },
     { key: 'totalExternalVolumeUsd' as SortKey, label: 'External Vol', align: 'right' as const, title: 'Total CoinGecko tracked perp volume across listed venues.' },
@@ -151,34 +162,42 @@
   const defaultVisibleColumns: Record<ColumnId, boolean> = {
     marketType: true,
     ticker: true,
-    volume24h: true,
+    vol14dMedianUsd: true,
     volumeZScore: false,
     openInterestNotional: true,
     mmsQuoting: true,
     totalMmLiquidityUsd: true,
+    spread14dBps: true,
+    spread24hBps: true,
+    depth100bps14dUsd: true,
+    depth100bps24hUsd: true,
+    slip10kBps14d: false,
+    slip10kBps24h: true,
+    slip100kBps14d: false,
+    slip100kBps24h: true,
     listedOnCount: true,
     avgVolPerExchangeUsd: false,
     totalExternalVolumeUsd: false,
     trending24h: true,
-    trending7d: false,
-    'pending:spread14d': false,
-    'pending:spread24hDelta': false,
-    'pending:depth14d': false,
-    'pending:depth24hDelta': false,
-    'pending:slippage10k14d': false,
-    'pending:slippage10k24hDelta': false,
-    'pending:slippage100k14d': false,
-    'pending:slippage100k24hDelta': false
+    trending7d: false
   };
 
   const columnWidths: Partial<Record<SortKey, string>> = {
     marketType: '58px',
     ticker: '88px',
-    volume24h: '88px',
+    vol14dMedianUsd: '92px',
     volumeZScore: '66px',
     openInterestNotional: '104px',
     mmsQuoting: '58px',
     totalMmLiquidityUsd: '88px',
+    spread14dBps: '64px',
+    spread24hBps: '108px',
+    depth100bps14dUsd: '80px',
+    depth100bps24hUsd: '120px',
+    slip10kBps14d: '64px',
+    slip10kBps24h: '108px',
+    slip100kBps14d: '64px',
+    slip100kBps24h: '108px',
     listedOnCount: '72px',
     avgVolPerExchangeUsd: '104px',
     totalExternalVolumeUsd: '102px',
@@ -221,6 +240,10 @@
   const { data: mmQuotesData, revalidate: revalidateMmQuotes } = useSWR<MmQuotesOverviewResponse>(
     () => '/api/mm-quotes/overview',
     { refreshInterval: 60_000 }
+  );
+  const { data: pairDepthData, revalidate: revalidatePairDepth } = useSWR<PairDepthOverviewResponse>(
+    () => '/api/pairdepth/overview',
+    { refreshInterval: 60_000, dedupingInterval: 30_000 }
   );
   const { data: mmDetailData, isLoading: mmDetailLoading, error: mmDetailError } = useSWR<MmQuotesDetailResponse>(
     () => '/api/mm-quotes/detail',
@@ -270,22 +293,43 @@
     return map;
   });
 
+  const pairDepthByTicker = $derived.by(() => {
+    const map = new Map<string, PairDepthOverviewTicker>();
+    for (const t of $pairDepthData?.data?.tickers ?? []) map.set(t.ticker, t);
+    return map;
+  });
+
+  const pairDepthWindow = $derived($pairDepthData?.meta?.window ?? null);
+
   const rows = $derived(
     ($data?.data.rows ?? []).map((row) => {
       const mmq = mmQuotesByTicker.get(row.ticker);
+      const pd = pairDepthByTicker.get(row.ticker);
       return {
         ...row,
         mmsQuoting: mmq?.mmsCount ?? null,
         totalMmLiquidityUsd: mmq?.totalQuotedUsd ?? null,
         mmMakerVolumeUsd24h: mmq?.makerVolumeUsd ?? null,
-        mmTakerVolumeUsd24h: mmq?.takerVolumeUsd ?? null
+        mmTakerVolumeUsd24h: mmq?.takerVolumeUsd ?? null,
+        vol14dMedianUsd: pd?.vol14dMedianUsd ?? null,
+        spread14dBps: pd?.spread14dBps ?? null,
+        spread24hBps: pd?.spread24hBps ?? null,
+        spreadDeltaPct: pd?.spreadDeltaPct ?? null,
+        depth100bps14dUsd: pd?.depth100bps14dUsd ?? null,
+        depth100bps24hUsd: pd?.depth100bps24hUsd ?? null,
+        depth100bpsDeltaPct: pd?.depth100bpsDeltaPct ?? null,
+        slip10kBps14d: pd?.slip10kBps14d ?? null,
+        slip10kBps24h: pd?.slip10kBps24h ?? null,
+        slip10kDeltaPct: pd?.slip10kDeltaPct ?? null,
+        slip100kBps14d: pd?.slip100kBps14d ?? null,
+        slip100kBps24h: pd?.slip100kBps24h ?? null,
+        slip100kDeltaPct: pd?.slip100kDeltaPct ?? null
       } as OverviewRow;
     })
   );
   const meta = $derived($data?.meta);
   const visibleDataColumns = $derived(columns.filter((col) => visibleColumns[col.key] !== false));
-  const visiblePendingColumns = $derived(pendingColumns.filter((col) => visibleColumns[col.id]));
-  const visibleColumnCount = $derived(visibleDataColumns.length + visiblePendingColumns.length);
+  const visibleColumnCount = $derived(visibleDataColumns.length);
   const activeAdvancedFilterCount = $derived(
     [
       minVolume24h,
@@ -319,7 +363,7 @@
     if (marketTypeFilter !== 'all') labels.push(`Type: ${marketTypeFilter}`);
     if (contextFilter !== 'all') labels.push(contextFilter === 'with-context' ? 'Has CoinGecko' : 'Missing CoinGecko');
 
-    addRange('Vol 24h', minVolume24h, maxVolume24h);
+    addRange('Vol 14d med', minVolume24h, maxVolume24h);
     addRange('Open Interest', minOpenInterest, maxOpenInterest);
     addRange('Listed On', minListedOn, maxListedOn);
     addRange('Vol Z', minVolumeZScore, maxVolumeZScore);
@@ -387,7 +431,7 @@
   async function handleRefresh() {
     refreshing = true;
     const minDelay = new Promise((resolve) => setTimeout(resolve, 350));
-    await Promise.all([revalidate(), revalidateMmQuotes(), minDelay]);
+    await Promise.all([revalidate(), revalidateMmQuotes(), revalidatePairDepth(), minDelay]);
     refreshing = false;
   }
 
@@ -543,7 +587,7 @@
 
     result = result.filter(
       (row) =>
-        matchesRange(row.volume24h, minVolume24h, maxVolume24h) &&
+        matchesRange(row.vol14dMedianUsd, minVolume24h, maxVolume24h) &&
         matchesRange(row.openInterestNotional, minOpenInterest, maxOpenInterest) &&
         matchesRange(row.listedOnCount, minListedOn, maxListedOn) &&
         matchesRange(row.volumeZScore, minVolumeZScore, maxVolumeZScore) &&
@@ -586,6 +630,30 @@
     if (abs >= 1_000) return `${sign}$${(abs / 1_000).toFixed(1)}K`;
     if (abs > 0) return `${sign}$${abs.toFixed(0)}`;
     return '$0';
+  }
+
+  function formatBps(value: number | null | undefined): string {
+    if (value == null) return '-';
+    const abs = Math.abs(value);
+    const digits = abs >= 100 ? 0 : abs >= 10 ? 1 : 2;
+    return `${value.toFixed(digits)}`;
+  }
+
+  function formatDeltaPct(value: number | null | undefined): string {
+    if (value == null) return '';
+    const abs = Math.abs(value);
+    const digits = abs >= 100 ? 0 : 1;
+    const sign = value > 0 ? '+' : '';
+    return `${sign}${value.toFixed(digits)}%`;
+  }
+
+  // direction: 'worseUp' = positive delta is bad (red), 'betterUp' = positive delta is good (green)
+  function deltaClass(value: number | null | undefined, direction: 'worseUp' | 'betterUp'): string {
+    if (value == null) return 'text-zinc-600';
+    if (Math.abs(value) < 0.5) return 'text-zinc-500';
+    const positiveIsGood = direction === 'betterUp';
+    const good = (value > 0) === positiveIsGood;
+    return good ? 'text-emerald-300' : 'text-red-300';
   }
 
   function formatZScore(value: number | null | undefined): string {
@@ -768,6 +836,10 @@
       <span>CoinGecko snapshot: {formatTimestamp(meta?.coingeckoSnapshotDate)}</span>
       <span class="mx-2 text-zinc-700">|</span>
       <span>Trending as of: {formatTimestamp(meta?.coingeckoTrendingAsOf)}</span>
+      {#if pairDepthWindow}
+        <span class="mx-2 text-zinc-700">|</span>
+        <span title={`PairDepth eval window: ${pairDepthWindow.from14d} → ${pairDepthWindow.to}`}>PairDepth: {formatTimestamp(pairDepthWindow.to)}</span>
+      {/if}
     </div>
   </div>
 
@@ -820,7 +892,7 @@
               <div class="mb-2 text-[10px] font-semibold uppercase tracking-wide text-zinc-600">dYdX live</div>
               <div class="space-y-2">
                 <div>
-                  <div class="mb-1 text-[11px] text-zinc-400">Vol 24h</div>
+                  <div class="mb-1 text-[11px] text-zinc-400">Vol 14d med</div>
                   <div class="grid grid-cols-2 gap-2">
                     <input bind:value={minVolume24h} placeholder="Min" class="rounded border border-zinc-800 bg-zinc-900 px-2 py-1.5 text-xs text-zinc-200 focus:border-violet-500 focus:outline-none mono" />
                     <input bind:value={maxVolume24h} placeholder="Max" class="rounded border border-zinc-800 bg-zinc-900 px-2 py-1.5 text-xs text-zinc-200 focus:border-violet-500 focus:outline-none mono" />
@@ -993,19 +1065,6 @@
                 />
               </label>
             {/each}
-
-            <div class="mt-3 px-1 pb-1 text-[10px] font-semibold uppercase tracking-wide text-zinc-600">Planned fields</div>
-            {#each pendingColumns as col}
-              <label class="flex cursor-pointer items-center justify-between rounded px-2 py-1.5 text-xs text-zinc-500 hover:bg-zinc-900/80 hover:text-zinc-300">
-                <span>{col.label}</span>
-                <input
-                  type="checkbox"
-                  checked={visibleColumns[col.id] === true}
-                  onchange={() => toggleColumn(col.id)}
-                  class="h-3.5 w-3.5 accent-violet-500"
-                />
-              </label>
-            {/each}
           </div>
         </div>
       {/if}
@@ -1057,9 +1116,6 @@
               {#each visibleDataColumns as col}
                 <col style={`width: ${columnWidths[col.key] ?? '84px'}`} />
               {/each}
-              {#each visiblePendingColumns as _}
-                <col style="width: 72px" />
-              {/each}
             </colgroup>
             <thead class="sticky top-0 z-20">
               <tr class="border-b border-zinc-800 bg-zinc-900/80">
@@ -1070,11 +1126,6 @@
                     onclick={() => toggleSort(col.key)}
                   >
                     {col.label}{sortIndicator(col.key)}
-                  </th>
-                {/each}
-                {#each visiblePendingColumns as col}
-                  <th class="truncate border-l border-zinc-800/70 bg-zinc-950/60 px-2 py-2.5 text-right text-[11px] font-medium text-zinc-600" title={`${col.label}. Planned column. Waiting for a confirmed source/API.`}>
-                    {col.short}
                   </th>
                 {/each}
               </tr>
@@ -1088,8 +1139,72 @@
                         <span class="inline-block rounded border px-1.5 py-0.5 text-[10px] font-semibold {typeClass(row.marketType)}">{row.marketType}</span>
                       {:else if col.key === 'ticker'}
                         {shortTicker(row.ticker)}
-                      {:else if col.key === 'volume24h'}
-                        <span class="text-zinc-100 mono">{formatUsd(row.volume24h)}</span>
+                      {:else if col.key === 'vol14dMedianUsd'}
+                        {#if row.vol14dMedianUsd == null}
+                          <span class="text-zinc-600 mono" title="No PairDepth daily volume data for this ticker.">-</span>
+                        {:else}
+                          <span class="text-zinc-100 mono" title={`14d median daily volume. Live 24h dYdX: ${formatUsd(row.volume24h)}`}>{formatUsd(row.vol14dMedianUsd)}</span>
+                        {/if}
+                      {:else if col.key === 'spread14dBps'}
+                        {#if row.spread14dBps == null}
+                          <span class="text-zinc-600 mono">-</span>
+                        {:else}
+                          <span class="text-zinc-100 mono">{formatBps(row.spread14dBps)}</span>
+                        {/if}
+                      {:else if col.key === 'spread24hBps'}
+                        {#if row.spread24hBps == null}
+                          <span class="text-zinc-600 mono">-</span>
+                        {:else}
+                          <span class="inline-flex items-baseline justify-end gap-1.5 mono" title={`24h ${formatBps(row.spread24hBps)} vs 14d ${formatBps(row.spread14dBps)}`}>
+                            <span class="text-zinc-100">{formatBps(row.spread24hBps)}</span>
+                            <span class="text-[10px] {deltaClass(row.spreadDeltaPct, 'worseUp')}">{formatDeltaPct(row.spreadDeltaPct)}</span>
+                          </span>
+                        {/if}
+                      {:else if col.key === 'depth100bps14dUsd'}
+                        {#if row.depth100bps14dUsd == null}
+                          <span class="text-zinc-600 mono">-</span>
+                        {:else}
+                          <span class="text-zinc-100 mono">{formatUsd(row.depth100bps14dUsd)}</span>
+                        {/if}
+                      {:else if col.key === 'depth100bps24hUsd'}
+                        {#if row.depth100bps24hUsd == null}
+                          <span class="text-zinc-600 mono">-</span>
+                        {:else}
+                          <span class="inline-flex items-baseline justify-end gap-1.5 mono" title={`24h ${formatUsd(row.depth100bps24hUsd)} vs 14d ${formatUsd(row.depth100bps14dUsd)}`}>
+                            <span class="text-zinc-100">{formatUsd(row.depth100bps24hUsd)}</span>
+                            <span class="text-[10px] {deltaClass(row.depth100bpsDeltaPct, 'betterUp')}">{formatDeltaPct(row.depth100bpsDeltaPct)}</span>
+                          </span>
+                        {/if}
+                      {:else if col.key === 'slip10kBps14d'}
+                        {#if row.slip10kBps14d == null}
+                          <span class="text-zinc-600 mono">-</span>
+                        {:else}
+                          <span class="text-zinc-100 mono">{formatBps(row.slip10kBps14d)}</span>
+                        {/if}
+                      {:else if col.key === 'slip10kBps24h'}
+                        {#if row.slip10kBps24h == null}
+                          <span class="text-zinc-600 mono">-</span>
+                        {:else}
+                          <span class="inline-flex items-baseline justify-end gap-1.5 mono" title={`24h ${formatBps(row.slip10kBps24h)} vs 14d ${formatBps(row.slip10kBps14d)}`}>
+                            <span class="text-zinc-100">{formatBps(row.slip10kBps24h)}</span>
+                            <span class="text-[10px] {deltaClass(row.slip10kDeltaPct, 'worseUp')}">{formatDeltaPct(row.slip10kDeltaPct)}</span>
+                          </span>
+                        {/if}
+                      {:else if col.key === 'slip100kBps14d'}
+                        {#if row.slip100kBps14d == null}
+                          <span class="text-zinc-600 mono">-</span>
+                        {:else}
+                          <span class="text-zinc-100 mono">{formatBps(row.slip100kBps14d)}</span>
+                        {/if}
+                      {:else if col.key === 'slip100kBps24h'}
+                        {#if row.slip100kBps24h == null}
+                          <span class="text-zinc-600 mono">-</span>
+                        {:else}
+                          <span class="inline-flex items-baseline justify-end gap-1.5 mono" title={`24h ${formatBps(row.slip100kBps24h)} vs 14d ${formatBps(row.slip100kBps14d)}`}>
+                            <span class="text-zinc-100">{formatBps(row.slip100kBps24h)}</span>
+                            <span class="text-[10px] {deltaClass(row.slip100kDeltaPct, 'worseUp')}">{formatDeltaPct(row.slip100kDeltaPct)}</span>
+                          </span>
+                        {/if}
                       {:else if col.key === 'volumeZScore'}
                         <span class="inline-block min-w-12 rounded border px-1.5 py-0.5 text-center text-[10px] mono {zScoreClass(row)}" title={zScoreTitle(row)}>
                           {formatZScore(row.volumeZScore)}
@@ -1150,9 +1265,6 @@
                         <span class="inline-block min-w-6 rounded border px-1.5 py-0.5 text-[10px] font-semibold {boolPill(row.trending7d)}">{row.trending7d ? 'Y' : 'N'}</span>
                       {/if}
                     </td>
-                  {/each}
-                  {#each visiblePendingColumns as _}
-                    <td class="whitespace-nowrap border-l border-zinc-800/40 bg-zinc-950/30 px-2 py-2 text-right text-[11px] text-zinc-700 mono">...</td>
                   {/each}
                 </tr>
 

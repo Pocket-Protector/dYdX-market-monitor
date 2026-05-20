@@ -32,6 +32,32 @@
       </p>
     </a>
     <a
+      href="/sla"
+      data-sveltekit-preload-data="hover"
+      class="group rounded-lg border border-zinc-800 bg-zinc-900 p-6 transition-colors hover:border-violet-500/50 hover:bg-zinc-800/50"
+    >
+      <div class="mb-2 text-xs font-medium tracking-widest text-zinc-500 uppercase">Section</div>
+      <div class="text-lg font-semibold text-zinc-100 group-hover:text-violet-400 transition-colors">
+        MM SLA
+      </div>
+      <p class="mt-2 text-sm text-zinc-400">
+        SLA tier uptime, liquidity and depth tracking per market maker
+      </p>
+    </a>
+    <a
+      href="/overview"
+      data-sveltekit-preload-data="hover"
+      class="group rounded-lg border border-zinc-800 bg-zinc-900 p-6 transition-colors hover:border-violet-500/50 hover:bg-zinc-800/50"
+    >
+      <div class="mb-2 text-xs font-medium tracking-widest text-zinc-500 uppercase">Section</div>
+      <div class="text-lg font-semibold text-zinc-100 group-hover:text-violet-400 transition-colors">
+        Overview
+      </div>
+      <p class="mt-2 text-sm text-zinc-400">
+        Per-ticker market health — volume, spread, depth, slippage and MM coverage
+      </p>
+    </a>
+    <a
       href="/markets"
       class="group rounded-lg border border-zinc-800 bg-zinc-900 p-6 transition-colors hover:border-violet-500/50 hover:bg-zinc-800/50"
     >
