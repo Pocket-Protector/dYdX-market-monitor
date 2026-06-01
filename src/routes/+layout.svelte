@@ -1,9 +1,13 @@
 <script lang="ts">
   import '../app.css';
+  import { dev } from '$app/environment';
   import { navigating, page } from '$app/stores';
+  import { injectAnalytics } from '@vercel/analytics/sveltekit';
   import Header from '$lib/components/layout/Header.svelte';
   import StatusBar from '$lib/components/layout/StatusBar.svelte';
   import type { Snippet } from 'svelte';
+
+  injectAnalytics({ mode: dev ? 'development' : 'production' });
 
   const { children }: { children: Snippet } = $props();
   const isLogin = $derived($page.url.pathname === '/login');
