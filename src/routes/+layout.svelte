@@ -1,11 +1,12 @@
 <script lang="ts">
   import '../app.css';
-  import { navigating } from '$app/stores';
+  import { navigating, page } from '$app/stores';
   import Header from '$lib/components/layout/Header.svelte';
   import StatusBar from '$lib/components/layout/StatusBar.svelte';
   import type { Snippet } from 'svelte';
 
   const { children }: { children: Snippet } = $props();
+  const isLogin = $derived($page.url.pathname === '/login');
 </script>
 
 <div class="min-h-screen bg-zinc-950 text-zinc-100">
@@ -14,7 +15,11 @@
       <div class="loading-bar h-full w-1/3 bg-violet-400"></div>
     </div>
   {/if}
-  <Header />
+  {#if !isLogin}
+    <Header />
+  {/if}
   {@render children()}
-  <StatusBar />
+  {#if !isLogin}
+    <StatusBar />
+  {/if}
 </div>
