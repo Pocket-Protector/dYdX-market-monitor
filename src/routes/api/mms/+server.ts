@@ -7,7 +7,7 @@ export async function GET() {
     const raw = await apiFetch('/mms');
     const parsed = MmsResponseSchema.parse(raw);
     return json(parsed.data.mms);
-  } catch (e) {
-    return json({ error: String(e) }, { status: 502 });
+  } catch {
+    return json({ error: 'MM list unavailable' }, { status: 502 });
   }
 }

@@ -4,6 +4,7 @@ import { apiFetch } from '$lib/api/client';
 
 const DYDX_MARKETS_URL = 'https://indexer.dydx.trade/v4/perpetualMarkets';
 const CACHE_TTL_MS = 60_000;
+const FETCH_TIMEOUT_MS = 28_000;
 
 interface DydxMarket {
   clobPairId: string;
@@ -90,15 +91,13 @@ export const GET: RequestHandler = async ({ fetch }) => {
   const warnings: string[] = [];
 
   const [dydxResult, contextResult, volumeSignalsResult] = await Promise.allSettled([
-    fetch(DYDX_MARKETS_URL),
+    fetch(DYDX_MARKETS_URL, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) }),
     apiFetch('/api/coingecko/market-context', undefined, { cacheTtlMs: 5 * 60_000 }),
     apiFetch('/api/market-volume-signals', undefined, { cacheTtlMs: 15 * 60_000 })
   ]);
 
   if (dydxResult.status === 'rejected' || !dydxResult.value.ok) {
-    const detail =
-      dydxResult.status === 'rejected' ? String(dydxResult.reason) : await dydxResult.value.text();
-    return json({ error: `Failed to fetch dYdX markets: ${detail}` }, { status: 502 });
+    return json({ error: 'Failed to fetch dYdX markets' }, { status: 502 });
   }
 
   let contextByTicker = new Map<string, CoinGeckoTickerContext>();

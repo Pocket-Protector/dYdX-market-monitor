@@ -7,6 +7,12 @@
   const { data }: { data: PageData } = $props();
 
   const today = new Date().toISOString().slice(0, 10);
+
+  function formatUtcTimestamp(value: string): string {
+    const date = new Date(value);
+    if (!Number.isFinite(date.getTime())) return value;
+    return date.toISOString().replace('.000Z', 'Z');
+  }
 </script>
 
 <PageShell>
@@ -52,7 +58,7 @@
               {row.firstTrackingDate}
             </td>
             <td class="mono px-4 py-3 text-right text-zinc-300">
-              {new Date(row.latestDataPoint).toLocaleString()}
+              {formatUtcTimestamp(row.latestDataPoint)}
             </td>
           </tr>
         {/each}

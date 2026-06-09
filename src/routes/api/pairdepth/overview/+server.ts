@@ -1,6 +1,7 @@
-import { json, error } from '@sveltejs/kit';
+import { json } from '@sveltejs/kit';
 import { PAIRDEPTH_API_BASE_URL } from '$env/static/private';
 import { PairDepthOverviewResponseSchema } from '$lib/features/pairdepth/schemas';
+import { fetchJson, parseWithSchema } from '$lib/server/upstream';
 import type { RequestHandler } from './$types';
 
 const CACHE_TTL_MS = 30_000;
@@ -23,16 +24,28 @@ export const GET: RequestHandler = async ({ fetch, setHeaders }) => {
   const upstream = new URL('/pairdepth-repo/overview', PAIRDEPTH_API_BASE_URL);
 
   inFlight = (async () => {
-    const res = await fetch(upstream.toString(), { signal: AbortSignal.timeout(28_000) });
-    if (!res.ok) throw error(res.status, `pairdepth upstream ${res.status}`);
-    const body = await res.json();
-    const parsed = PairDepthOverviewResponseSchema.parse(body);
+    const body = await fetchJson(fetch, upstream, { timeoutMs: 28_000, upstreamName: 'PairDepth' });
+    const parsed = parseWithSchema(PairDepthOverviewResponseSchema, body, 'PairDepth overview response');
     cached = { value: parsed, expiresAt: Date.now() + CACHE_TTL_MS };
     return parsed;
   })().finally(() => {
     inFlight = null;
   });
 
-  const value = await inFlight;
-  return json(value);
+  try {
+    const value = await inFlight;
+    return json(value);
+  } catch {
+    if (cached) return json(cached.value);
+    const nowIso = new Date().toISOString();
+    return json({
+      meta: {
+        endpoint: '/api/pairdepth/overview',
+        window: { from24h: nowIso, to: nowIso, from14d: nowIso },
+        notes: ['PairDepth data is temporarily unavailable. Overview core market data is still shown.']
+      },
+      data: null,
+      error: 'PairDepth unavailable'
+    });
+  }
 };

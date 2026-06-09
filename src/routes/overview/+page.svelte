@@ -1,6 +1,6 @@
 <script lang="ts">
   import { browser } from '$app/environment';
-  import { onMount } from 'svelte';
+  import { onDestroy, onMount } from 'svelte';
   import { useSWR } from 'sswr';
   import PageShell from '$lib/components/layout/PageShell.svelte';
   import LoadingSpinner from '$lib/shared/components/LoadingSpinner.svelte';
@@ -137,7 +137,7 @@
   ];
 
   const columns = [
-    { key: 'tradingHours' as unknown as SortKey, label: 'Trading hours', align: 'left' as const, title: 'Quoted liquidity & depth split by trading session (last full week). Click + for the per-session breakdown.' },
+    { key: 'tradingHours' as unknown as SortKey, label: 'Hours', align: 'left' as const, title: 'Quoted liquidity & depth split by trading session (last full week). Click + for the per-session breakdown.' },
     { key: 'marketType' as SortKey, label: 'Type', align: 'left' as const, title: 'dYdX margin mode.' },
     { key: 'ticker' as SortKey, label: 'Ticker', align: 'left' as const, title: 'Canonical dYdX market ticker.' },
     { key: 'vol14dMedianUsd' as SortKey, label: 'Vol 14d med', align: 'right' as const, title: '14-day median of daily 24h notional volume (from PairDepth daily_volume_group).' },
@@ -185,10 +185,10 @@
   };
 
   const columnWidths: Record<string, string> = {
-    tradingHours: '110px',
+    tradingHours: '48px',
     marketType: '58px',
-    ticker: '88px',
-    vol14dMedianUsd: '92px',
+    ticker: '68px',
+    vol14dMedianUsd: '84px',
     volumeZScore: '66px',
     openInterestNotional: '104px',
     mmsQuoting: '58px',
@@ -298,6 +298,7 @@
   let showColumnMenu = $state(false);
   let showFilterMenu = $state(false);
   let visibleColumns = $state<Record<ColumnId, boolean>>({ ...defaultVisibleColumns });
+  let columnLoadSecondsLeft = $state(30);
   let minVolume24h = $state('');
   let maxVolume24h = $state('');
   let minOpenInterest = $state('');
@@ -316,6 +317,7 @@
   let showMmFilterMenu = $state(false);
   let mmFilterSearch = $state('');
   let preferencesLoaded = $state(false);
+  let controlsRoot: HTMLDivElement;
 
   // Measured heights of the sticky layers, so each layer's top offset is the sum of
   // everything stacked above it — survives wrapping, zoom, and header changes.
@@ -326,11 +328,11 @@
   const tableHeadTop = $derived(`calc(var(--app-header-h, 44px) + ${controlsBarHeight + summaryBarHeight}px)`);
 
   const { data, error, isLoading, revalidate } = useSWR<OverviewResponse>(() => '/api/overview');
-  const { data: mmQuotesData, revalidate: revalidateMmQuotes } = useSWR<MmQuotesOverviewResponse>(
+  const { data: mmQuotesData, error: mmQuotesError, revalidate: revalidateMmQuotes } = useSWR<MmQuotesOverviewResponse>(
     () => '/api/mm-quotes/overview',
     { refreshInterval: 60_000 }
   );
-  const { data: pairDepthData, revalidate: revalidatePairDepth } = useSWR<PairDepthOverviewResponse>(
+  const { data: pairDepthData, error: pairDepthError, revalidate: revalidatePairDepth } = useSWR<PairDepthOverviewResponse>(
     () => '/api/pairdepth/overview',
     { refreshInterval: 60_000, dedupingInterval: 30_000 }
   );
@@ -415,6 +417,33 @@
     })
   );
   const meta = $derived($data?.meta);
+  const sideColumnsLoading = $derived(
+    Boolean(
+      $data &&
+        ((!$mmQuotesData && !$mmQuotesError) ||
+          (!$pairDepthData && !$pairDepthError) ||
+          (!$mmDetailData && !$mmDetailError))
+    )
+  );
+  const sideColumnsUnavailable = $derived(
+    Boolean($mmQuotesError || $pairDepthError || $mmDetailError || $mmQuotesData?.error || $pairDepthData?.error || $mmDetailData?.error)
+  );
+  const overviewWarnings = $derived(meta?.warnings ?? []);
+
+  $effect(() => {
+    if (!sideColumnsLoading) {
+      columnLoadSecondsLeft = 30;
+      return;
+    }
+
+    columnLoadSecondsLeft = 30;
+    const timer = window.setInterval(() => {
+      columnLoadSecondsLeft = Math.max(0, columnLoadSecondsLeft - 1);
+    }, 1000);
+
+    return () => window.clearInterval(timer);
+  });
+
   const visibleDataColumns = $derived(columns.filter((col) => visibleColumns[col.key] !== false));
   const visibleColumnCount = $derived(visibleDataColumns.length);
   const activeAdvancedFilterCount = $derived(
@@ -472,6 +501,22 @@
   });
 
   onMount(() => {
+    const closeMenus = () => {
+      showFilterMenu = false;
+      showMmFilterMenu = false;
+      showColumnMenu = false;
+    };
+    const onKeydown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') closeMenus();
+    };
+    const onPointerDown = (event: PointerEvent) => {
+      if (!controlsRoot || controlsRoot.contains(event.target as Node)) return;
+      closeMenus();
+    };
+
+    window.addEventListener('keydown', onKeydown);
+    window.addEventListener('pointerdown', onPointerDown);
+
     const savedColumns = safeParse<Record<ColumnId, boolean>>(localStorage.getItem(COLUMNS_STORAGE_KEY));
     if (savedColumns) {
       visibleColumns = { ...defaultVisibleColumns, ...savedColumns, ticker: true };
@@ -503,6 +548,17 @@
     }
 
     preferencesLoaded = true;
+
+    return () => {
+      window.removeEventListener('keydown', onKeydown);
+      window.removeEventListener('pointerdown', onPointerDown);
+    };
+  });
+
+  onDestroy(() => {
+    showFilterMenu = false;
+    showMmFilterMenu = false;
+    showColumnMenu = false;
   });
 
   $effect(() => {
@@ -584,6 +640,30 @@
     mmFilterSearch = '';
   }
 
+  function toggleFilterMenu() {
+    showFilterMenu = !showFilterMenu;
+    if (showFilterMenu) {
+      showMmFilterMenu = false;
+      showColumnMenu = false;
+    }
+  }
+
+  function toggleMmFilterMenu() {
+    showMmFilterMenu = !showMmFilterMenu;
+    if (showMmFilterMenu) {
+      showFilterMenu = false;
+      showColumnMenu = false;
+    }
+  }
+
+  function toggleColumnMenu() {
+    showColumnMenu = !showColumnMenu;
+    if (showColumnMenu) {
+      showFilterMenu = false;
+      showMmFilterMenu = false;
+    }
+  }
+
   function toggleColumn(id: ColumnId) {
     if (id === 'ticker') return;
     visibleColumns[id] = !visibleColumns[id];
@@ -605,6 +685,12 @@
     if (align === 'right') return 'text-right';
     if (align === 'center') return 'text-center';
     return 'text-left';
+  }
+
+  function cellPaddingClass(key: string): string {
+    if (key === 'ticker') return 'pl-2 pr-1';
+    if (key === 'vol14dMedianUsd') return 'pl-1 pr-2';
+    return 'px-2';
   }
 
   function parseFilterNumber(value: string): number | null {
@@ -920,6 +1006,30 @@
   :global(.overview-panel select) {
     padding-right: 2.25rem;
   }
+
+  :global(.overview-sticky-solid) {
+    background: #09090b;
+    box-shadow: 0 1px 0 #27272a;
+  }
+
+  :global(.overview-table-head) {
+    background: #18181b;
+    box-shadow: 0 1px 0 #27272a;
+  }
+
+  :global(.overview-toolbar-sticky) {
+    position: sticky;
+  }
+
+  :global(.overview-toolbar-sticky::before) {
+    content: '';
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: -24px;
+    height: 24px;
+    background: #09090b;
+  }
 </style>
 
 <PageShell wide>
@@ -927,7 +1037,8 @@
     <h1 class="text-2xl font-semibold text-zinc-100">Market Overview</h1>
   </div>
 
-  <div bind:offsetHeight={controlsBarHeight} class="sticky top-[var(--app-header-h,44px)] z-30 -mx-6 mb-4 border-b border-zinc-800/60 bg-zinc-950/95 px-6 py-3 backdrop-blur-sm">
+  <div bind:this={controlsRoot} bind:offsetHeight={controlsBarHeight} class="overview-toolbar-sticky top-[var(--app-header-h,44px)] z-30 -mx-6 bg-zinc-950 px-6 py-3">
+  <div class="rounded-lg border border-zinc-800 bg-zinc-950 p-3 shadow-sm shadow-black/20">
   <div class="flex flex-wrap items-center gap-3">
     <input
       type="text"
@@ -957,7 +1068,8 @@
     <div class="relative">
       <button
         class="overview-control rounded border border-zinc-700 bg-zinc-900 font-medium text-zinc-200 transition-colors hover:border-zinc-500 hover:bg-zinc-800 {activeAdvancedFilterCount > 0 ? 'border-violet-500/40 bg-violet-500/15 text-violet-300' : ''}"
-        onclick={() => (showFilterMenu = !showFilterMenu)}
+        aria-expanded={showFilterMenu}
+        onclick={toggleFilterMenu}
       >
         Filters{activeAdvancedFilterCount > 0 ? ` (${activeAdvancedFilterCount})` : ''}
       </button>
@@ -1059,7 +1171,8 @@
     <div class="relative">
       <button
         class="overview-control rounded border border-zinc-700 bg-zinc-900 font-medium text-zinc-200 transition-colors hover:border-zinc-500 hover:bg-zinc-800 {selectedMmFilters.length > 0 ? 'border-violet-500/40 bg-violet-500/15 text-violet-300' : ''}"
-        onclick={() => (showMmFilterMenu = !showMmFilterMenu)}
+        aria-expanded={showMmFilterMenu}
+        onclick={toggleMmFilterMenu}
       >
         MMs{selectedMmFilters.length > 0 ? ` (${selectedMmFilters.length})` : ''}
       </button>
@@ -1098,7 +1211,7 @@
             {:else if filteredMmFilterOptions.length === 0}
               <div class="px-2 py-3 text-center text-[11px] text-zinc-500">No MMs match "{mmFilterSearch}".</div>
             {:else}
-              {#each filteredMmFilterOptions as mm}
+              {#each filteredMmFilterOptions as mm (mm.slug)}
                 <label class="flex cursor-pointer items-center justify-between rounded px-2 py-1.5 text-xs text-zinc-300 hover:bg-zinc-900/80">
                   <span class="flex items-center gap-2">
                     <span>{mm.name}</span>
@@ -1121,7 +1234,8 @@
     <div class="relative">
       <button
         class="overview-control rounded border border-zinc-700 bg-zinc-900 font-medium text-zinc-200 transition-colors hover:border-zinc-500 hover:bg-zinc-800"
-        onclick={() => (showColumnMenu = !showColumnMenu)}
+        aria-expanded={showColumnMenu}
+        onclick={toggleColumnMenu}
       >
         Columns ({visibleColumnCount})
       </button>
@@ -1163,13 +1277,9 @@
       {refreshing ? 'Refreshing...' : 'Refresh'}
     </button>
   </div>
-  </div>
 
-  {#if meta?.warnings?.length}
-    <div class="mb-4 rounded border border-amber-400/30 bg-amber-400/10 px-3 py-2 text-xs text-amber-200">
-      {meta.warnings.join(' ')}
-    </div>
-  {/if}
+  </div>
+  </div>
 
   {#if !browser || $isLoading}
     <LoadingSpinner />
@@ -1185,9 +1295,27 @@
       {/if}
       <div class="min-w-[1040px] min-[1100px]:min-w-0">
         <div class="overflow-clip rounded-lg border border-zinc-800">
-          <div bind:offsetHeight={summaryBarHeight} style:top={summaryBarTop} class="sticky z-20 flex flex-wrap items-center justify-between gap-2 border-b border-zinc-800 bg-zinc-950/95 px-3 py-2 text-xs text-zinc-500 backdrop-blur-sm">
+          <div bind:offsetHeight={summaryBarHeight} style:top={summaryBarTop} class="overview-sticky-solid sticky z-20 flex flex-wrap items-center justify-between gap-2 border-y border-zinc-800 px-3 py-2 text-xs text-zinc-500">
             <div class="flex min-w-0 flex-wrap items-center gap-2">
               <span class="font-medium text-zinc-300">{statusHeading}</span>
+              {#if sideColumnsLoading}
+                <span class="rounded border border-zinc-700 bg-zinc-900 px-1.5 py-0.5 text-[10px] text-zinc-300">
+                  {#if columnLoadSecondsLeft > 0}
+                    Loading column data · ~{columnLoadSecondsLeft}s
+                  {:else}
+                    Still loading column data
+                  {/if}
+                </span>
+              {:else if sideColumnsUnavailable}
+                <span class="rounded border border-amber-400/30 bg-amber-400/10 px-1.5 py-0.5 text-[10px] text-amber-200">
+                  Some column data unavailable
+                </span>
+              {/if}
+              {#if overviewWarnings.length}
+                <span class="rounded border border-amber-400/30 bg-amber-400/10 px-1.5 py-0.5 text-[10px] text-amber-200" title={overviewWarnings.join(' ')}>
+                  Data warning
+                </span>
+              {/if}
               {#if activeFilterLabels.length}
                 <span class="text-zinc-700">|</span>
                 {#each activeFilterLabels.slice(0, 5) as label}
@@ -1212,12 +1340,12 @@
                 <col style={`width: ${columnWidths[col.key] ?? '84px'}`} />
               {/each}
             </colgroup>
-            <thead style:top={tableHeadTop} class="sticky z-10">
-              <tr class="border-b border-zinc-800 bg-zinc-900/95 backdrop-blur-sm">
+            <thead style:top={tableHeadTop} class="overview-table-head sticky z-10">
+              <tr class="border-b border-zinc-800 bg-zinc-900">
                 {#each visibleDataColumns as col}
                   {@const sortable = !NON_SORTABLE_COLUMNS.has(col.key)}
                   <th
-                    class="select-none truncate px-2 py-2.5 text-[11px] font-medium text-zinc-500 transition-colors {sortable ? 'cursor-pointer hover:text-zinc-200' : 'cursor-default'} {cellAlignClass(col.align)}"
+                    class="select-none truncate bg-zinc-900 py-2.5 text-[11px] font-medium text-zinc-500 transition-colors {cellPaddingClass(col.key)} {sortable ? 'cursor-pointer hover:text-zinc-200' : 'cursor-default'} {cellAlignClass(col.align)}"
                     title={col.title}
                     onclick={() => sortable && toggleSort(col.key)}
                   >
@@ -1230,12 +1358,15 @@
               {#each filtered as row (row.clobPairId)}
                 <tr class="border-b border-zinc-800/50 transition-colors hover:bg-zinc-800/30 {row.status !== 'ACTIVE' ? 'opacity-60' : ''}">
                   {#each visibleDataColumns as col}
-                    <td class="whitespace-nowrap px-2 py-2 {cellAlignClass(col.align)} {col.key === 'ticker' ? 'truncate font-medium text-violet-300 mono' : ''}" title={col.key === 'ticker' ? row.ticker : undefined}>
+                    <td class="whitespace-nowrap py-2 {cellPaddingClass(col.key)} {cellAlignClass(col.align)} {col.key === 'ticker' ? 'truncate font-medium text-violet-300 mono' : ''}" title={col.key === 'ticker' ? row.ticker : undefined}>
                       {#if String(col.key) === 'tradingHours'}
                         <button
+                          id={`trading-hours-toggle-${row.clobPairId}`}
                           class="inline-flex h-5 w-5 items-center justify-center rounded border text-[13px] leading-none transition-colors {openTradingHoursTicker === row.ticker ? 'border-violet-500/50 bg-violet-500/20 text-violet-300' : 'border-zinc-700 bg-zinc-900 text-zinc-400 hover:border-zinc-500 hover:text-zinc-200'}"
                           title="Per-session quoted liquidity & depth for {shortTicker(row.ticker)}"
                           aria-label="Toggle trading-hours breakdown"
+                          aria-expanded={openTradingHoursTicker === row.ticker}
+                          aria-controls={`trading-hours-panel-${row.clobPairId}`}
                           onclick={() => toggleTradingHours(row)}
                         >
                           {openTradingHoursTicker === row.ticker ? '−' : '+'}
@@ -1375,7 +1506,7 @@
 
                 {#if openTradingHoursTicker === row.ticker}
                   <tr class="border-b border-zinc-800/70 bg-zinc-800/30">
-                    <td colspan={visibleColumnCount} class="px-3 py-3">
+                    <td id={`trading-hours-panel-${row.clobPairId}`} colspan={visibleColumnCount} class="px-3 py-3">
                       <div class="w-full overflow-hidden rounded border border-zinc-700/80 bg-zinc-800/25 shadow-2xl shadow-black/40">
                         <div class="flex flex-wrap items-center justify-between gap-3 border-b border-zinc-800 bg-zinc-900/80 px-3 py-2">
                           <div>

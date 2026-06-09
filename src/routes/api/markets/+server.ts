@@ -5,6 +5,7 @@ const DYDX_MARKETS_URL = 'https://indexer.dydx.trade/v4/perpetualMarkets';
 
 let cache: { data: unknown; ts: number } | null = null;
 const TTL_MS = 15_000;
+const FETCH_TIMEOUT_MS = 28_000;
 
 export const GET: RequestHandler = async ({ fetch }) => {
   const now = Date.now();
@@ -12,12 +13,16 @@ export const GET: RequestHandler = async ({ fetch }) => {
     return json(cache.data);
   }
 
-  const res = await fetch(DYDX_MARKETS_URL);
-  if (!res.ok) {
+  let raw: any;
+  try {
+    const res = await fetch(DYDX_MARKETS_URL, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
+    if (!res.ok) throw new Error(`upstream ${res.status}`);
+    raw = await res.json();
+  } catch {
+    // Serve the last known payload (even if expired) rather than failing hard.
+    if (cache) return json(cache.data);
     return json({ error: 'Failed to fetch dYdX markets' }, { status: 502 });
   }
-
-  const raw = await res.json();
   const markets = raw.markets ?? {};
 
   const rows = Object.values(markets).map((m: any) => {

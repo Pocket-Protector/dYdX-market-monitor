@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { page } from '$app/state';
   import PageShell from '$lib/components/layout/PageShell.svelte';
   import DateRangeSelector from '$lib/shared/components/DateRangeSelector.svelte';
   import TableSkeleton from '$lib/shared/components/skeletons/TableSkeleton.svelte';
@@ -12,12 +13,15 @@
 
   const { data }: { data: PageData } = $props();
 
-  const from = $derived(data.from);
-  const to = $derived(data.to);
-  const liquidityData = $derived(data.liquidityData);
-  const liquidityError = $derived(data.liquidityError);
-  const uptimeData = $derived(data.uptimeData);
-  const uptimeError = $derived(data.uptimeError);
+  const requestedFrom = $derived(page.url.searchParams.get('from') ?? data.defaultFrom);
+  const requestedTo = $derived(page.url.searchParams.get('to') ?? data.defaultTo);
+  const from = $derived(requestedFrom);
+  const to = $derived(requestedTo);
+  const hasMatchingRangeData = $derived(data.from === requestedFrom && data.to === requestedTo);
+  const liquidityData = $derived(hasMatchingRangeData ? data.liquidityData : null);
+  const liquidityError = $derived(hasMatchingRangeData ? data.liquidityError : null);
+  const uptimeData = $derived(hasMatchingRangeData ? data.uptimeData : null);
+  const uptimeError = $derived(hasMatchingRangeData ? data.uptimeError : null);
   const configData = $derived(data.configData);
   const configError = $derived(data.configError);
 
