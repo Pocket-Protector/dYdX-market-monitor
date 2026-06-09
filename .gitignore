@@ -27,3 +27,5 @@ vite.config.ts.timestamp-*
 .playwright-mcp
 .codex-vite*.log
 /docs
+
+/overview-snapshot

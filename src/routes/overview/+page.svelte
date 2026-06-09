@@ -137,6 +137,7 @@
   ];
 
   const columns = [
+    { key: 'tradingHours' as unknown as SortKey, label: 'Trading hours', align: 'left' as const, title: 'Quoted liquidity & depth split by trading session (last full week). Click + for the per-session breakdown.' },
     { key: 'marketType' as SortKey, label: 'Type', align: 'left' as const, title: 'dYdX margin mode.' },
     { key: 'ticker' as SortKey, label: 'Ticker', align: 'left' as const, title: 'Canonical dYdX market ticker.' },
     { key: 'vol14dMedianUsd' as SortKey, label: 'Vol 14d med', align: 'right' as const, title: '14-day median of daily 24h notional volume (from PairDepth daily_volume_group).' },
@@ -160,6 +161,7 @@
   ];
 
   const defaultVisibleColumns: Record<ColumnId, boolean> = {
+    tradingHours: true,
     marketType: true,
     ticker: true,
     vol14dMedianUsd: true,
@@ -182,7 +184,8 @@
     trending7d: false
   };
 
-  const columnWidths: Partial<Record<SortKey, string>> = {
+  const columnWidths: Record<string, string> = {
+    tradingHours: '110px',
     marketType: '58px',
     ticker: '88px',
     vol14dMedianUsd: '92px',
@@ -205,6 +208,83 @@
     trending7d: '62px'
   };
 
+  // Columns that are expanders / non-metric and must not trigger sorting.
+  const NON_SORTABLE_COLUMNS = new Set<string>(['tradingHours']);
+
+  // Trading sessions (UTC) — see mm-performance-v2/docs/trading hours/tradinghours.md
+  const TRADING_SESSIONS = [
+    { key: 'overnight', label: 'Overnight', utc: 'Mon-Fri 00:00-08:00 UTC', weight: 0.78 },
+    { key: 'premarket', label: 'Premarket', utc: 'Mon-Fri 08:00-13:30 UTC', weight: 1.12 },
+    { key: 'regular', label: 'Regular Trading', utc: 'Mon-Fri 13:30-20:00 UTC', weight: 1.45 },
+    { key: 'extended', label: 'Extended / After-hours', utc: 'Mon-Fri 20:00-00:00 UTC', weight: 0.92 },
+    { key: 'weekend', label: 'Weekend closed', utc: 'Sat 00:00-Mon 00:00 UTC', weight: 0.6 }
+  ] as const;
+
+  interface TradingHoursSessionRow {
+    label: string;
+    utc: string;
+    mmLiq: number | null;
+    spr14d: number | null;
+    spr24h: number | null;
+    dpt14d: number | null;
+    dpt24h: number | null;
+    s10k14d: number | null;
+    s10k24h: number | null;
+    s100k14d: number | null;
+    s100k24h: number | null;
+  }
+
+  // FNV-1a — stable hash so dummy values vary by seed but never flicker between renders.
+  function fnv1a(seed: string): number {
+    let h = 2166136261;
+    for (let i = 0; i < seed.length; i++) {
+      h ^= seed.charCodeAt(i);
+      h = Math.imul(h, 16777619);
+    }
+    return h >>> 0;
+  }
+
+  function seedFactor(seed: string): number {
+    return 0.7 + (fnv1a(seed) % 600) / 1000;
+  }
+
+  // DUMMY data: per-session breakdown derived from the row's real aggregates, scaled by a
+  // fixed per-session weight and a stable hash. Replace with /api/trading-hours/summary later.
+  function tradingHoursRows(row: OverviewRow): TradingHoursSessionRow[] {
+    return TRADING_SESSIONS.map((s) => {
+      // Liquidity/depth scale up with session activity (weight); spread/slippage tighten inversely.
+      const up = (base: number | null, salt: string): number | null =>
+        base == null ? null : base * s.weight * seedFactor(`${row.ticker}:${s.key}:${salt}`);
+      const down = (base: number | null, salt: string): number | null =>
+        base == null ? null : (base / s.weight) * seedFactor(`${row.ticker}:${s.key}:${salt}`);
+      return {
+        label: s.label,
+        utc: s.utc,
+        mmLiq: up(row.totalMmLiquidityUsd, 'liq'),
+        spr14d: down(row.spread14dBps, 'spr14'),
+        spr24h: down(row.spread24hBps, 'spr24'),
+        dpt14d: up(row.depth100bps14dUsd, 'dpt14'),
+        dpt24h: up(row.depth100bps24hUsd, 'dpt24'),
+        s10k14d: down(row.slip10kBps14d, 's10k14'),
+        s10k24h: down(row.slip10kBps24h, 's10k24'),
+        s100k14d: down(row.slip100kBps14d, 's100k14'),
+        s100k24h: down(row.slip100kBps24h, 's100k24')
+      };
+    });
+  }
+
+  // DUMMY time-in-book median (ms), deterministic per MM slug. ~30ms..3s, matching the
+  // magnitudes in mm-performance-v2/docs/time-in-book/README.md. Replace with real metric later.
+  function dummyTibMs(slug: string): number {
+    return 30 + (fnv1a(slug) % 2970);
+  }
+
+  function formatTib(ms: number | null | undefined): string {
+    if (ms == null) return '-';
+    if (ms >= 1000) return `${(ms / 1000).toFixed(2)} s`;
+    return `${Math.round(ms)} ms`;
+  }
+
   let search = $state('');
   let statusFilter = $state('ACTIVE');
   let marketTypeFilter = $state('all');
@@ -213,6 +293,7 @@
   let sortDir = $state<'asc' | 'desc'>('desc');
   let openVenueTicker = $state<string | null>(null);
   let openMmTicker = $state<string | null>(null);
+  let openTradingHoursTicker = $state<string | null>(null);
   let refreshing = $state(false);
   let showColumnMenu = $state(false);
   let showFilterMenu = $state(false);
@@ -235,6 +316,14 @@
   let showMmFilterMenu = $state(false);
   let mmFilterSearch = $state('');
   let preferencesLoaded = $state(false);
+
+  // Measured heights of the sticky layers, so each layer's top offset is the sum of
+  // everything stacked above it — survives wrapping, zoom, and header changes.
+  // --app-header-h is published by Header.svelte (44px fallback covers SSR).
+  let controlsBarHeight = $state(0);
+  let summaryBarHeight = $state(0);
+  const summaryBarTop = $derived(`calc(var(--app-header-h, 44px) + ${controlsBarHeight}px)`);
+  const tableHeadTop = $derived(`calc(var(--app-header-h, 44px) + ${controlsBarHeight + summaryBarHeight}px)`);
 
   const { data, error, isLoading, revalidate } = useSWR<OverviewResponse>(() => '/api/overview');
   const { data: mmQuotesData, revalidate: revalidateMmQuotes } = useSWR<MmQuotesOverviewResponse>(
@@ -298,8 +387,6 @@
     for (const t of $pairDepthData?.data?.tickers ?? []) map.set(t.ticker, t);
     return map;
   });
-
-  const pairDepthWindow = $derived($pairDepthData?.meta?.window ?? null);
 
   const rows = $derived(
     ($data?.data.rows ?? []).map((row) => {
@@ -621,6 +708,10 @@
     return result;
   });
 
+  // Platform totals (client-side) over the currently filtered set, shown inline in the grey bar.
+  const totalVol14dMedian = $derived(filtered.reduce((sum, row) => sum + (row.vol14dMedianUsd ?? 0), 0));
+  const totalOpenInterest = $derived(filtered.reduce((sum, row) => sum + (row.openInterestNotional ?? 0), 0));
+
   function formatUsd(value: number | null | undefined): string {
     if (value == null) return '-';
     const abs = Math.abs(value);
@@ -708,6 +799,10 @@
   function toggleMmTable(row: OverviewRow) {
     if (row.mmsQuoting == null) return;
     openMmTicker = openMmTicker === row.ticker ? null : row.ticker;
+  }
+
+  function toggleTradingHours(row: OverviewRow) {
+    openTradingHoursTicker = openTradingHoursTicker === row.ticker ? null : row.ticker;
   }
 
   function formatUptime(value: number | null | undefined): string {
@@ -828,22 +923,12 @@
 </style>
 
 <PageShell wide>
-  <div class="mb-5 flex flex-wrap items-end justify-between gap-4">
-    <div>
-      <h1 class="text-2xl font-semibold text-zinc-100">Market Overview</h1>
-    </div>
-    <div class="text-right text-xs text-zinc-500">
-      <span>CoinGecko snapshot: {formatTimestamp(meta?.coingeckoSnapshotDate)}</span>
-      <span class="mx-2 text-zinc-700">|</span>
-      <span>Trending as of: {formatTimestamp(meta?.coingeckoTrendingAsOf)}</span>
-      {#if pairDepthWindow}
-        <span class="mx-2 text-zinc-700">|</span>
-        <span title={`PairDepth eval window: ${pairDepthWindow.from14d} → ${pairDepthWindow.to}`}>PairDepth: {formatTimestamp(pairDepthWindow.to)}</span>
-      {/if}
-    </div>
+  <div class="mb-5">
+    <h1 class="text-2xl font-semibold text-zinc-100">Market Overview</h1>
   </div>
 
-  <div class="mb-4 flex flex-wrap items-center gap-3">
+  <div bind:offsetHeight={controlsBarHeight} class="sticky top-[var(--app-header-h,44px)] z-30 -mx-6 mb-4 border-b border-zinc-800/60 bg-zinc-950/95 px-6 py-3 backdrop-blur-sm">
+  <div class="flex flex-wrap items-center gap-3">
     <input
       type="text"
       bind:value={search}
@@ -1078,6 +1163,7 @@
       {refreshing ? 'Refreshing...' : 'Refresh'}
     </button>
   </div>
+  </div>
 
   {#if meta?.warnings?.length}
     <div class="mb-4 rounded border border-amber-400/30 bg-amber-400/10 px-3 py-2 text-xs text-amber-200">
@@ -1090,13 +1176,16 @@
   {:else if $error}
     <ErrorBanner message="Failed to load overview data" />
   {:else}
-    <div class="relative overflow-x-auto 2xl:overflow-visible">
+    <!-- min-[1100px] = table min-width (1040px) + page padding. Above it the wrapper must be
+         overflow-visible: any overflow-x-auto ancestor disables viewport-sticky for the
+         summary bar and thead, even when nothing actually overflows. -->
+    <div class="relative overflow-x-auto min-[1100px]:overflow-visible">
       {#if refreshing}
         <div class="absolute inset-0 z-10 rounded-lg skeleton"></div>
       {/if}
-      <div class="min-w-[1040px] 2xl:min-w-0">
-        <div class="overflow-hidden rounded-lg border border-zinc-800">
-          <div class="flex flex-wrap items-center justify-between gap-2 border-b border-zinc-800 bg-zinc-900/40 px-3 py-2 text-xs text-zinc-500">
+      <div class="min-w-[1040px] min-[1100px]:min-w-0">
+        <div class="overflow-clip rounded-lg border border-zinc-800">
+          <div bind:offsetHeight={summaryBarHeight} style:top={summaryBarTop} class="sticky z-20 flex flex-wrap items-center justify-between gap-2 border-b border-zinc-800 bg-zinc-950/95 px-3 py-2 text-xs text-zinc-500 backdrop-blur-sm">
             <div class="flex min-w-0 flex-wrap items-center gap-2">
               <span class="font-medium text-zinc-300">{statusHeading}</span>
               {#if activeFilterLabels.length}
@@ -1109,7 +1198,13 @@
                 {/if}
               {/if}
             </div>
-            <div>{filtered.length} / {rows.length} markets</div>
+            <div class="flex items-center gap-3 whitespace-nowrap">
+              <span title="Sum of Vol 14d median across the filtered markets.">Total Vol 14d <span class="text-zinc-300 mono">{formatUsd(totalVol14dMedian)}</span></span>
+              <span class="text-zinc-700">|</span>
+              <span title="Sum of current open interest (notional) across the filtered markets.">Total OI <span class="text-zinc-300 mono">{formatUsd(totalOpenInterest)}</span></span>
+              <span class="text-zinc-700">|</span>
+              <span>{filtered.length} / {rows.length} markets</span>
+            </div>
           </div>
           <table class="w-full table-fixed text-[12px]">
             <colgroup>
@@ -1117,15 +1212,16 @@
                 <col style={`width: ${columnWidths[col.key] ?? '84px'}`} />
               {/each}
             </colgroup>
-            <thead class="sticky top-0 z-20">
-              <tr class="border-b border-zinc-800 bg-zinc-900/80">
+            <thead style:top={tableHeadTop} class="sticky z-10">
+              <tr class="border-b border-zinc-800 bg-zinc-900/95 backdrop-blur-sm">
                 {#each visibleDataColumns as col}
+                  {@const sortable = !NON_SORTABLE_COLUMNS.has(col.key)}
                   <th
-                    class="cursor-pointer select-none truncate px-2 py-2.5 text-[11px] font-medium text-zinc-500 transition-colors hover:text-zinc-200 {cellAlignClass(col.align)}"
+                    class="select-none truncate px-2 py-2.5 text-[11px] font-medium text-zinc-500 transition-colors {sortable ? 'cursor-pointer hover:text-zinc-200' : 'cursor-default'} {cellAlignClass(col.align)}"
                     title={col.title}
-                    onclick={() => toggleSort(col.key)}
+                    onclick={() => sortable && toggleSort(col.key)}
                   >
-                    {col.label}{sortIndicator(col.key)}
+                    {col.label}{sortable ? sortIndicator(col.key) : ''}
                   </th>
                 {/each}
               </tr>
@@ -1135,7 +1231,16 @@
                 <tr class="border-b border-zinc-800/50 transition-colors hover:bg-zinc-800/30 {row.status !== 'ACTIVE' ? 'opacity-60' : ''}">
                   {#each visibleDataColumns as col}
                     <td class="whitespace-nowrap px-2 py-2 {cellAlignClass(col.align)} {col.key === 'ticker' ? 'truncate font-medium text-violet-300 mono' : ''}" title={col.key === 'ticker' ? row.ticker : undefined}>
-                      {#if col.key === 'marketType'}
+                      {#if String(col.key) === 'tradingHours'}
+                        <button
+                          class="inline-flex h-5 w-5 items-center justify-center rounded border text-[13px] leading-none transition-colors {openTradingHoursTicker === row.ticker ? 'border-violet-500/50 bg-violet-500/20 text-violet-300' : 'border-zinc-700 bg-zinc-900 text-zinc-400 hover:border-zinc-500 hover:text-zinc-200'}"
+                          title="Per-session quoted liquidity & depth for {shortTicker(row.ticker)}"
+                          aria-label="Toggle trading-hours breakdown"
+                          onclick={() => toggleTradingHours(row)}
+                        >
+                          {openTradingHoursTicker === row.ticker ? '−' : '+'}
+                        </button>
+                      {:else if col.key === 'marketType'}
                         <span class="inline-block rounded border px-1.5 py-0.5 text-[10px] font-semibold {typeClass(row.marketType)}">{row.marketType}</span>
                       {:else if col.key === 'ticker'}
                         {shortTicker(row.ticker)}
@@ -1268,6 +1373,54 @@
                   {/each}
                 </tr>
 
+                {#if openTradingHoursTicker === row.ticker}
+                  <tr class="border-b border-zinc-800/70 bg-zinc-800/30">
+                    <td colspan={visibleColumnCount} class="px-3 py-3">
+                      <div class="w-full overflow-hidden rounded border border-zinc-700/80 bg-zinc-800/25 shadow-2xl shadow-black/40">
+                        <div class="flex flex-wrap items-center justify-between gap-3 border-b border-zinc-800 bg-zinc-900/80 px-3 py-2">
+                          <div>
+                            <div class="flex items-center gap-2">
+                              <span class="text-xs font-semibold text-zinc-100 mono">{shortTicker(row.ticker)} trading hours</span>
+                              <span class="rounded border border-amber-400/30 bg-amber-400/10 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-amber-300">Dummy</span>
+                            </div>
+                            <div class="mt-0.5 text-[11px] text-zinc-500">
+                              Quoted liquidity &amp; depth by UTC trading session (last full week). Placeholder data until /api/trading-hours lands.
+                            </div>
+                          </div>
+                        </div>
+
+                        <div class="grid grid-cols-[1.6fr_1fr_0.8fr_0.8fr_1fr_1fr_0.8fr_0.8fr_0.8fr_0.8fr] border-b border-zinc-800 bg-zinc-900/80 px-3 py-1.5 text-[11px] font-medium text-zinc-500">
+                          <div>Session</div>
+                          <div class="text-right" title="Sum over MMs of typical quoted depth in this session.">MM Liq</div>
+                          <div class="text-right">Spr 14d</div>
+                          <div class="text-right">Spr 24h</div>
+                          <div class="text-right">Dpt 14d</div>
+                          <div class="text-right">Dpt 24h</div>
+                          <div class="text-right">S10K 14d</div>
+                          <div class="text-right">S10K 24h</div>
+                          <div class="text-right">S100K 14d</div>
+                          <div class="text-right">S100K 24h</div>
+                        </div>
+
+                        {#each tradingHoursRows(row) as session}
+                          <div class="grid grid-cols-[1.6fr_1fr_0.8fr_0.8fr_1fr_1fr_0.8fr_0.8fr_0.8fr_0.8fr] items-center border-b border-zinc-800/60 px-3 py-1.5 text-xs text-zinc-300 last:border-b-0">
+                            <div class="truncate font-medium text-zinc-200" title={session.utc}>{session.label}</div>
+                            <div class="text-right text-zinc-100 mono">{formatUsd(session.mmLiq)}</div>
+                            <div class="text-right text-zinc-300 mono">{formatBps(session.spr14d)}</div>
+                            <div class="text-right text-zinc-300 mono">{formatBps(session.spr24h)}</div>
+                            <div class="text-right text-zinc-300 mono">{formatUsd(session.dpt14d)}</div>
+                            <div class="text-right text-zinc-300 mono">{formatUsd(session.dpt24h)}</div>
+                            <div class="text-right text-zinc-300 mono">{formatBps(session.s10k14d)}</div>
+                            <div class="text-right text-zinc-300 mono">{formatBps(session.s10k24h)}</div>
+                            <div class="text-right text-zinc-300 mono">{formatBps(session.s100k14d)}</div>
+                            <div class="text-right text-zinc-300 mono">{formatBps(session.s100k24h)}</div>
+                          </div>
+                        {/each}
+                      </div>
+                    </td>
+                  </tr>
+                {/if}
+
                 {#if openVenueTicker === row.ticker}
                   <tr class="border-b border-zinc-800/70 bg-zinc-800/30">
                     <td colspan={visibleColumnCount} class="px-3 py-3">
@@ -1361,7 +1514,7 @@
                             <div class="px-3 py-4 text-center text-xs text-zinc-500">No per-MM breakdown available for this ticker.</div>
                           {/if}
                         {:else}
-                          <div class="grid grid-cols-[1.4fr_0.7fr_1fr_1fr_1fr_1fr_1fr_1.2fr] border-b border-zinc-800 bg-zinc-900/80 px-3 py-1.5 text-[11px] font-medium text-zinc-500">
+                          <div class="grid grid-cols-[1.4fr_0.7fr_1fr_1fr_1fr_1fr_1fr_1.2fr_1fr] border-b border-zinc-800 bg-zinc-900/80 px-3 py-1.5 text-[11px] font-medium text-zinc-500">
                             <div>MM</div>
                             <div class="text-right" title="twoSidedMinutes / 1440">Uptime</div>
                             <div class="text-right" title="Median bid depth across two-sided minutes (group-level)">Bid</div>
@@ -1370,12 +1523,13 @@
                             <div class="text-right" title="Maker fill volume in the last 24h (all wallets+subs in the group)">Maker</div>
                             <div class="text-right" title="Taker fill volume in the last 24h">Taker</div>
                             <div class="pl-4 text-right">Share</div>
+                            <div class="text-right" title="DUMMY: median time an order rests in the book before being replaced/cancelled. Real metric pending.">Time in Book</div>
                           </div>
 
                           {#each detail.mms as mm}
                             {@const share = mmShare(mm, detail)}
                             {@const split = bidAskSplitPct(mm)}
-                            <div class="grid grid-cols-[1.4fr_0.7fr_1fr_1fr_1fr_1fr_1fr_1.2fr] items-center border-b border-zinc-800/60 px-3 py-1.5 text-xs text-zinc-300 last:border-b-0">
+                            <div class="grid grid-cols-[1.4fr_0.7fr_1fr_1fr_1fr_1fr_1fr_1.2fr_1fr] items-center border-b border-zinc-800/60 px-3 py-1.5 text-xs text-zinc-300 last:border-b-0">
                               <div class="truncate font-medium text-zinc-200 mono" title={mm.mmSlug}>{mm.displayName}</div>
                               <div class="text-right mono {uptimeClass(mm.uptimePct)}" title={`${mm.twoSidedMinutes} / 1440 two-sided minutes`}>{formatUptime(mm.uptimePct)}</div>
                               <div class="text-right text-zinc-200 mono" title={split ? `${split.bid.toFixed(0)}% of own quoted depth` : ''}>{formatUsd(mm.bidQuotedUsd)}</div>
@@ -1391,6 +1545,7 @@
                                   <span class="w-10 text-right text-[10px] text-zinc-400 mono">{formatShare(share)}</span>
                                 </div>
                               </div>
+                              <div class="text-right text-zinc-300 mono" title="DUMMY median time-in-book">{formatTib(dummyTibMs(mm.mmSlug))}</div>
                             </div>
                           {/each}
                         {/if}

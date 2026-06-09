@@ -5,9 +5,17 @@
   const onOverview = $derived($page.url.pathname.startsWith('/overview'));
   const onMarkout = $derived($page.url.pathname.startsWith('/markoutPnL'));
   const onSla = $derived($page.url.pathname.startsWith('/sla'));
+
+  // Published as --app-header-h so pages can stack their own sticky bars below
+  // the header without hardcoding its height.
+  let headerHeight = $state(0);
+
+  $effect(() => {
+    document.documentElement.style.setProperty('--app-header-h', `${headerHeight}px`);
+  });
 </script>
 
-<header class="sticky top-0 z-30 border-b border-zinc-800 bg-zinc-950/95 backdrop-blur-sm">
+<header bind:offsetHeight={headerHeight} class="sticky top-0 z-30 border-b border-zinc-800 bg-zinc-950/95 backdrop-blur-sm">
   <div class="mx-auto flex max-w-screen-xl items-stretch gap-8 px-6">
 
     <!-- Wordmark -->
