@@ -13,6 +13,15 @@
     MmQuotesDetailTicker
   } from '$lib/features/mm-quotes/types';
   import type { PairDepthOverviewResponse, PairDepthOverviewTicker } from '$lib/features/pairdepth/types';
+  import type {
+    TradingHoursSummaryResponse,
+    TradingHoursSummaryTicker,
+    TradingHoursDetailResponse,
+    TradingHoursDetailTicker,
+    TradingHoursWindow,
+    TradingHoursSessionKey
+  } from '$lib/features/trading-hours/types';
+  import type { TibDetailResponse, TibTicker } from '$lib/features/time-in-book/types';
 
   interface ExchangeVolume {
     exchangeId: string;
@@ -211,78 +220,114 @@
   // Columns that are expanders / non-metric and must not trigger sorting.
   const NON_SORTABLE_COLUMNS = new Set<string>(['tradingHours']);
 
-  // Trading sessions (UTC) — see mm-performance-v2/docs/trading hours/tradinghours.md
-  const TRADING_SESSIONS = [
-    { key: 'overnight', label: 'Overnight', utc: 'Mon-Fri 00:00-08:00 UTC', weight: 0.78 },
-    { key: 'premarket', label: 'Premarket', utc: 'Mon-Fri 08:00-13:30 UTC', weight: 1.12 },
-    { key: 'regular', label: 'Regular Trading', utc: 'Mon-Fri 13:30-20:00 UTC', weight: 1.45 },
-    { key: 'extended', label: 'Extended / After-hours', utc: 'Mon-Fri 20:00-00:00 UTC', weight: 0.92 },
-    { key: 'weekend', label: 'Weekend closed', utc: 'Sat 00:00-Mon 00:00 UTC', weight: 0.6 }
-  ] as const;
+  // Trading sessions (fixed UTC, do NOT track US DST) — keys match /api/trading-hours/summary.
+  // `wholeWeek` is intentionally omitted: we show the five live sessions only.
+  const TRADING_SESSIONS: { key: TradingHoursSessionKey; label: string; utc: string }[] = [
+    { key: 'overnight', label: 'Overnight', utc: 'Mon-Fri 00:00-08:00 UTC' },
+    { key: 'premarket', label: 'Premarket', utc: 'Mon-Fri 08:00-13:30 UTC' },
+    { key: 'regularTrading', label: 'Regular Trading', utc: 'Mon-Fri 13:30-20:00 UTC' },
+    { key: 'extendedAfterHours', label: 'Extended / After-hours', utc: 'Mon-Fri 20:00-00:00 UTC' },
+    { key: 'weekendClosed', label: 'Weekend closed', utc: 'Sat 00:00-Mon 00:00 UTC' }
+  ];
 
   interface TradingHoursSessionRow {
+    key: TradingHoursSessionKey;
     label: string;
     utc: string;
-    mmLiq: number | null;
-    spr14d: number | null;
-    spr24h: number | null;
-    dpt14d: number | null;
-    dpt24h: number | null;
-    s10k14d: number | null;
-    s10k24h: number | null;
-    s100k14d: number | null;
-    s100k24h: number | null;
+    usd: number | null; // median (bid+ask) quoted USD, summed across MMs
+    twoSidedMinutes: number | null;
+    availableMinutes: number | null;
+    relLiqPct: number | null; // this session's liquidity vs the busiest session (peak = 100%)
   }
 
-  // FNV-1a — stable hash so dummy values vary by seed but never flicker between renders.
-  function fnv1a(seed: string): number {
-    let h = 2166136261;
-    for (let i = 0; i < seed.length; i++) {
-      h ^= seed.charCodeAt(i);
-      h = Math.imul(h, 16777619);
-    }
-    return h >>> 0;
-  }
-
-  function seedFactor(seed: string): number {
-    return 0.7 + (fnv1a(seed) % 600) / 1000;
-  }
-
-  // DUMMY data: per-session breakdown derived from the row's real aggregates, scaled by a
-  // fixed per-session weight and a stable hash. Replace with /api/trading-hours/summary later.
-  function tradingHoursRows(row: OverviewRow): TradingHoursSessionRow[] {
+  // Real per-session breakdown from /api/trading-hours/summary (last completed week).
+  // `relLiqPct` is computed client-side: each session's quoted liquidity as a share of the
+  // ticker's busiest session, so heavier vs lighter sessions read at a glance.
+  // Returns [] when the ticker has no trading-hours row (cold start / zero-quoting ticker).
+  function tradingHoursRows(ticker: string): TradingHoursSessionRow[] {
+    const t = tradingHoursByTicker.get(ticker);
+    if (!t) return [];
+    const win = tradingHoursWindow;
+    const peakUsd = TRADING_SESSIONS.reduce((max, s) => {
+      const v = t.sessions[s.key]?.usd ?? null;
+      return v != null && v > max ? v : max;
+    }, 0);
     return TRADING_SESSIONS.map((s) => {
-      // Liquidity/depth scale up with session activity (weight); spread/slippage tighten inversely.
-      const up = (base: number | null, salt: string): number | null =>
-        base == null ? null : base * s.weight * seedFactor(`${row.ticker}:${s.key}:${salt}`);
-      const down = (base: number | null, salt: string): number | null =>
-        base == null ? null : (base / s.weight) * seedFactor(`${row.ticker}:${s.key}:${salt}`);
+      const sess = t.sessions[s.key];
+      const usd = sess?.usd ?? null;
       return {
+        key: s.key,
         label: s.label,
         utc: s.utc,
-        mmLiq: up(row.totalMmLiquidityUsd, 'liq'),
-        spr14d: down(row.spread14dBps, 'spr14'),
-        spr24h: down(row.spread24hBps, 'spr24'),
-        dpt14d: up(row.depth100bps14dUsd, 'dpt14'),
-        dpt24h: up(row.depth100bps24hUsd, 'dpt24'),
-        s10k14d: down(row.slip10kBps14d, 's10k14'),
-        s10k24h: down(row.slip10kBps24h, 's10k24'),
-        s100k14d: down(row.slip100kBps14d, 's100k14'),
-        s100k24h: down(row.slip100kBps24h, 's100k24')
+        usd,
+        twoSidedMinutes: sess?.twoSidedMinutes ?? null,
+        availableMinutes: win?.sessions?.[s.key]?.available ?? null,
+        relLiqPct: usd != null && peakUsd > 0 ? (usd / peakUsd) * 100 : null
       };
     });
   }
 
-  // DUMMY time-in-book median (ms), deterministic per MM slug. ~30ms..3s, matching the
-  // magnitudes in mm-performance-v2/docs/time-in-book/README.md. Replace with real metric later.
-  function dummyTibMs(slug: string): number {
-    return 30 + (fnv1a(slug) % 2970);
+  interface TradingHoursSessionMmRow {
+    mmSlug: string;
+    displayName: string;
+    usd: number | null;
+    twoSidedMinutes: number | null;
+    coveragePct: number | null; // this MM's own two-sided minutes / session available
+  }
+
+  // Per-MM breakdown for one ticker + session, from /api/trading-hours/detail.
+  // Sorted by quoted liquidity descending (nulls last).
+  function tradingHoursSessionMms(ticker: string, key: TradingHoursSessionKey): TradingHoursSessionMmRow[] {
+    const t = tradingHoursDetailByTicker.get(ticker);
+    if (!t) return [];
+    const available = tradingHoursWindow?.sessions?.[key]?.available ?? null;
+    return t.mms
+      .map((mm) => {
+        const sess = mm.sessions[key];
+        const twoSided = sess?.twoSidedMinutes ?? null;
+        return {
+          mmSlug: mm.mmSlug,
+          displayName: mm.displayName,
+          usd: sess?.usd ?? null,
+          twoSidedMinutes: twoSided,
+          coveragePct: twoSided != null && available ? Math.min(100, (twoSided / available) * 100) : null
+        };
+      })
+      .sort((a, b) => (b.usd ?? -Infinity) - (a.usd ?? -Infinity));
+  }
+
+  function toggleTradingHoursSession(ticker: string, key: TradingHoursSessionKey) {
+    const id = `${ticker}::${key}`;
+    openTradingHoursSession = openTradingHoursSession === id ? null : id;
   }
 
   function formatTib(ms: number | null | undefined): string {
     if (ms == null) return '-';
     if (ms >= 1000) return `${(ms / 1000).toFixed(2)} s`;
     return `${Math.round(ms)} ms`;
+  }
+
+  // Real time-in-book for this MM on this ticker (rolling last 24h). null = no repriced
+  // population for this MM/ticker pair.
+  function tibForMm(ticker: string, mmSlug: string): TibTicker | null {
+    return tibByTickerMm.get(`${ticker}::${mmSlug}`) ?? null;
+  }
+
+  // Median repricing time (ms) the MM-liquidity panel shows; null when never repriced.
+  function tibMedianMs(ticker: string, mmSlug: string): number | null {
+    return tibForMm(ticker, mmSlug)?.repriced.medianMs ?? null;
+  }
+
+  function tibTitle(ticker: string, mmSlug: string): string {
+    const t = tibForMm(ticker, mmSlug);
+    if (!t || t.repriced.medianMs == null) {
+      return 'No quote-update data for this MM on this ticker in the last 24h.';
+    }
+    return [
+      `Median ${formatTib(t.repriced.medianMs)}  ·  p90 ${formatTib(t.repriced.p90Ms)}`,
+      'How long this MM leaves an order before updating its quote.',
+      'Median = a typical order; p90 = its slowest 10%.'
+    ].join('\n');
   }
 
   let search = $state('');
@@ -294,6 +339,8 @@
   let openVenueTicker = $state<string | null>(null);
   let openMmTicker = $state<string | null>(null);
   let openTradingHoursTicker = $state<string | null>(null);
+  // Identifies the expanded session inside the trading-hours panel: `${ticker}::${sessionKey}`.
+  let openTradingHoursSession = $state<string | null>(null);
   let refreshing = $state(false);
   let showColumnMenu = $state(false);
   let showFilterMenu = $state(false);
@@ -341,9 +388,46 @@
     { refreshInterval: 60_000, dedupingInterval: 30_000 }
   );
 
+  const { data: tradingHoursData, error: tradingHoursError } = useSWR<TradingHoursSummaryResponse>(
+    () => '/api/trading-hours/summary',
+    { refreshInterval: 300_000, dedupingInterval: 300_000 }
+  );
+  const { data: tradingHoursDetailData, error: tradingHoursDetailError, isLoading: tradingHoursDetailLoading } =
+    useSWR<TradingHoursDetailResponse>(() => '/api/trading-hours/detail', {
+      refreshInterval: 300_000,
+      dedupingInterval: 300_000
+    });
+  const { data: tibData, error: tibError, isLoading: tibLoading } = useSWR<TibDetailResponse>(
+    () => '/api/time-in-book/detail',
+    { refreshInterval: 60_000, dedupingInterval: 60_000 }
+  );
+
   const mmDetailByTicker = $derived.by(() => {
     const map = new Map<string, MmQuotesDetailTicker>();
     for (const t of $mmDetailData?.data?.tickers ?? []) map.set(t.ticker, t);
+    return map;
+  });
+
+  const tradingHoursByTicker = $derived.by(() => {
+    const map = new Map<string, TradingHoursSummaryTicker>();
+    for (const t of $tradingHoursData?.data ?? []) map.set(t.ticker, t);
+    return map;
+  });
+  const tradingHoursWindow = $derived<TradingHoursWindow | null>($tradingHoursData?.meta?.window ?? null);
+  const tradingHoursNote = $derived($tradingHoursData?.meta?.note ?? null);
+
+  const tradingHoursDetailByTicker = $derived.by(() => {
+    const map = new Map<string, TradingHoursDetailTicker>();
+    for (const t of $tradingHoursDetailData?.data ?? []) map.set(t.ticker, t);
+    return map;
+  });
+
+  // Per-ticker, per-MM time-in-book, keyed `${ticker}::${mmSlug}` to join onto the MM panel.
+  const tibByTickerMm = $derived.by(() => {
+    const map = new Map<string, TibTicker>();
+    for (const mm of $tibData?.data?.mms ?? []) {
+      for (const t of mm.tickers ?? []) map.set(`${t.ticker}::${mm.mmSlug}`, t);
+    }
     return map;
   });
 
@@ -889,6 +973,7 @@
 
   function toggleTradingHours(row: OverviewRow) {
     openTradingHoursTicker = openTradingHoursTicker === row.ticker ? null : row.ticker;
+    openTradingHoursSession = null;
   }
 
   function formatUptime(value: number | null | undefined): string {
@@ -1505,48 +1590,113 @@
                 </tr>
 
                 {#if openTradingHoursTicker === row.ticker}
+                  {@const thTicker = tradingHoursByTicker.get(row.ticker)}
+                  {@const thRows = tradingHoursRows(row.ticker)}
                   <tr class="border-b border-zinc-800/70 bg-zinc-800/30">
                     <td id={`trading-hours-panel-${row.clobPairId}`} colspan={visibleColumnCount} class="px-3 py-3">
                       <div class="w-full overflow-hidden rounded border border-zinc-700/80 bg-zinc-800/25 shadow-2xl shadow-black/40">
                         <div class="flex flex-wrap items-center justify-between gap-3 border-b border-zinc-800 bg-zinc-900/80 px-3 py-2">
                           <div>
-                            <div class="flex items-center gap-2">
-                              <span class="text-xs font-semibold text-zinc-100 mono">{shortTicker(row.ticker)} trading hours</span>
-                              <span class="rounded border border-amber-400/30 bg-amber-400/10 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-amber-300">Dummy</span>
-                            </div>
+                            <div class="text-xs font-semibold text-zinc-100 mono">{shortTicker(row.ticker)} trading hours</div>
                             <div class="mt-0.5 text-[11px] text-zinc-500">
-                              Quoted liquidity &amp; depth by UTC trading session (last full week). Placeholder data until /api/trading-hours lands.
+                              Median two-sided quoted liquidity &amp; coverage by UTC trading session{tradingHoursWindow ? ` · week ${tradingHoursWindow.label}` : ''}.
                             </div>
                           </div>
+                          {#if thTicker}
+                            <div class="text-right text-[11px]">
+                              <div class="text-zinc-500">MMs quoting</div>
+                              <div class="text-zinc-200 mono">{thTicker.mmsCount}</div>
+                            </div>
+                          {/if}
                         </div>
 
-                        <div class="grid grid-cols-[1.6fr_1fr_0.8fr_0.8fr_1fr_1fr_0.8fr_0.8fr_0.8fr_0.8fr] border-b border-zinc-800 bg-zinc-900/80 px-3 py-1.5 text-[11px] font-medium text-zinc-500">
-                          <div>Session</div>
-                          <div class="text-right" title="Sum over MMs of typical quoted depth in this session.">MM Liq</div>
-                          <div class="text-right">Spr 14d</div>
-                          <div class="text-right">Spr 24h</div>
-                          <div class="text-right">Dpt 14d</div>
-                          <div class="text-right">Dpt 24h</div>
-                          <div class="text-right">S10K 14d</div>
-                          <div class="text-right">S10K 24h</div>
-                          <div class="text-right">S100K 14d</div>
-                          <div class="text-right">S100K 24h</div>
-                        </div>
-
-                        {#each tradingHoursRows(row) as session}
-                          <div class="grid grid-cols-[1.6fr_1fr_0.8fr_0.8fr_1fr_1fr_0.8fr_0.8fr_0.8fr_0.8fr] items-center border-b border-zinc-800/60 px-3 py-1.5 text-xs text-zinc-300 last:border-b-0">
-                            <div class="truncate font-medium text-zinc-200" title={session.utc}>{session.label}</div>
-                            <div class="text-right text-zinc-100 mono">{formatUsd(session.mmLiq)}</div>
-                            <div class="text-right text-zinc-300 mono">{formatBps(session.spr14d)}</div>
-                            <div class="text-right text-zinc-300 mono">{formatBps(session.spr24h)}</div>
-                            <div class="text-right text-zinc-300 mono">{formatUsd(session.dpt14d)}</div>
-                            <div class="text-right text-zinc-300 mono">{formatUsd(session.dpt24h)}</div>
-                            <div class="text-right text-zinc-300 mono">{formatBps(session.s10k14d)}</div>
-                            <div class="text-right text-zinc-300 mono">{formatBps(session.s10k24h)}</div>
-                            <div class="text-right text-zinc-300 mono">{formatBps(session.s100k14d)}</div>
-                            <div class="text-right text-zinc-300 mono">{formatBps(session.s100k24h)}</div>
+                        {#if $tradingHoursError || $tradingHoursData?.error}
+                          <div class="px-3 py-4 text-center text-xs text-red-300">Failed to load trading-hours data.</div>
+                        {:else if !$tradingHoursData}
+                          <div class="px-3 py-4 text-center text-xs text-zinc-500">Loading trading hours...</div>
+                        {:else if tradingHoursNote}
+                          <div class="px-3 py-4 text-center text-xs text-zinc-500">Weekly trading-hours job has not produced data yet.</div>
+                        {:else if thRows.length === 0}
+                          <div class="px-3 py-4 text-center text-xs text-zinc-500">No two-sided quoting for this ticker in the last full week.</div>
+                        {:else}
+                          <div class="grid grid-cols-[0.3fr_1.3fr_1.6fr_1fr_1.6fr] border-b border-zinc-800 bg-zinc-900/80 px-3 py-1.5 text-[11px] font-medium text-zinc-500">
+                            <div></div>
+                            <div>Session</div>
+                            <div>UTC window</div>
+                            <div class="text-right" title="Median (bid+ask) quoted USD over two-sided minutes, summed across MMs.">Quoted Liq</div>
+                            <div class="text-right" title="This session's quoted liquidity vs the busiest session (peak = 100%).">Liq vs peak</div>
                           </div>
-                        {/each}
+
+                          {#each thRows as session}
+                            {@const sessionOpen = openTradingHoursSession === `${row.ticker}::${session.key}`}
+                            <button
+                              type="button"
+                              class="grid w-full grid-cols-[0.3fr_1.3fr_1.6fr_1fr_1.6fr] items-center border-b border-zinc-800/60 px-3 py-1.5 text-left text-xs text-zinc-300 transition-colors last:border-b-0 hover:bg-zinc-800/40 {sessionOpen ? 'bg-violet-500/10' : ''}"
+                              title="Show per-MM breakdown for {session.label}"
+                              aria-expanded={sessionOpen}
+                              onclick={() => toggleTradingHoursSession(row.ticker, session.key)}
+                            >
+                              <span class="text-[13px] leading-none {sessionOpen ? 'text-violet-300' : 'text-zinc-500'}">{sessionOpen ? '−' : '+'}</span>
+                              <span class="truncate font-medium text-zinc-200">{session.label}</span>
+                              <span class="truncate text-[11px] text-zinc-500">{session.utc}</span>
+                              <span class="text-right text-zinc-100 mono">{session.usd == null ? '-' : formatUsd(session.usd)}</span>
+                              <span class="block pl-4">
+                                {#if session.relLiqPct == null}
+                                  <span class="block text-right text-zinc-600 mono">-</span>
+                                {:else}
+                                  <span class="flex items-center gap-2">
+                                    <span class="h-1.5 flex-1 overflow-hidden rounded-full bg-zinc-800">
+                                      <span
+                                        class="block h-full rounded-full {session.relLiqPct >= 80 ? 'bg-emerald-500' : session.relLiqPct >= 50 ? 'bg-violet-500' : 'bg-amber-500'}"
+                                        style={`width: ${Math.min(100, Math.max(0, session.relLiqPct))}%`}
+                                      ></span>
+                                    </span>
+                                    <span class="w-10 text-right text-[10px] text-zinc-400 mono">{session.relLiqPct.toFixed(0)}%</span>
+                                  </span>
+                                {/if}
+                              </span>
+                            </button>
+
+                            {#if sessionOpen}
+                              {@const sessionMms = tradingHoursSessionMms(row.ticker, session.key)}
+                              {@const peerPeak = sessionMms.reduce((m, x) => (x.usd != null && x.usd > m ? x.usd : m), 0)}
+                              <div class="border-b border-zinc-800/60 bg-zinc-950/40 px-3 py-2 last:border-b-0">
+                                <div class="mb-1.5 text-[11px] font-medium text-zinc-400">{session.label} — per-MM quoting ({session.utc})</div>
+                                {#if $tradingHoursDetailError || $tradingHoursDetailData?.error}
+                                  <div class="py-2 text-center text-[11px] text-red-300">Failed to load per-MM breakdown.</div>
+                                {:else if !$tradingHoursDetailData && $tradingHoursDetailLoading}
+                                  <div class="py-2 text-center text-[11px] text-zinc-500">Loading per-MM breakdown...</div>
+                                {:else if sessionMms.length === 0}
+                                  <div class="py-2 text-center text-[11px] text-zinc-500">No MM quoted two-sided in this session.</div>
+                                {:else}
+                                  <div class="grid grid-cols-[1.6fr_1fr_1fr_1.6fr] border-b border-zinc-800/80 px-1 py-1 text-[10px] font-medium uppercase tracking-wide text-zinc-600">
+                                    <div>MM</div>
+                                    <div class="text-right">Quoted Liq</div>
+                                    <div class="text-right" title="This MM's two-sided minutes ÷ available minutes in the session.">Coverage</div>
+                                    <div class="pl-4 text-right" title="This MM's quoted liquidity vs the strongest MM in this session.">Share of session</div>
+                                  </div>
+                                  {#each sessionMms as mm}
+                                    <div class="grid grid-cols-[1.6fr_1fr_1fr_1.6fr] items-center border-b border-zinc-800/40 px-1 py-1 text-[11px] text-zinc-300 last:border-b-0">
+                                      <div class="truncate font-medium text-zinc-200 mono" title={mm.mmSlug}>{mm.displayName}</div>
+                                      <div class="text-right text-zinc-100 mono">{mm.usd == null ? '-' : formatUsd(mm.usd)}</div>
+                                      <div class="text-right mono {mm.coveragePct == null ? 'text-zinc-600' : mm.coveragePct >= 95 ? 'text-emerald-300' : mm.coveragePct >= 60 ? 'text-zinc-300' : 'text-amber-300'}" title={mm.twoSidedMinutes != null && session.availableMinutes != null ? `${mm.twoSidedMinutes} / ${session.availableMinutes} min two-sided` : ''}>
+                                        {mm.coveragePct == null ? '-' : `${mm.coveragePct.toFixed(0)}%`}
+                                      </div>
+                                      <div class="pl-4">
+                                        <div class="flex items-center gap-2">
+                                          <div class="h-1.5 flex-1 overflow-hidden rounded-full bg-zinc-800">
+                                            <div class="h-full rounded-full bg-violet-500" style={`width: ${peerPeak > 0 && mm.usd != null ? Math.min(100, (mm.usd / peerPeak) * 100) : 0}%`}></div>
+                                          </div>
+                                          <span class="w-10 text-right text-[10px] text-zinc-400 mono">{peerPeak > 0 && mm.usd != null ? `${((mm.usd / peerPeak) * 100).toFixed(0)}%` : '-'}</span>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  {/each}
+                                {/if}
+                              </div>
+                            {/if}
+                          {/each}
+                        {/if}
                       </div>
                     </td>
                   </tr>
@@ -1645,29 +1795,28 @@
                             <div class="px-3 py-4 text-center text-xs text-zinc-500">No per-MM breakdown available for this ticker.</div>
                           {/if}
                         {:else}
-                          <div class="grid grid-cols-[1.4fr_0.7fr_1fr_1fr_1fr_1fr_1fr_1.2fr_1fr] border-b border-zinc-800 bg-zinc-900/80 px-3 py-1.5 text-[11px] font-medium text-zinc-500">
+                          <div class="grid grid-cols-[1.4fr_0.7fr_1fr_1fr_1fr_1.2fr_1fr_1fr_1.5fr] border-b border-zinc-800 bg-zinc-900/80 px-3 py-1.5 text-[11px] font-medium text-zinc-500">
                             <div>MM</div>
                             <div class="text-right" title="twoSidedMinutes / 1440">Uptime</div>
                             <div class="text-right" title="Median bid depth across two-sided minutes (group-level)">Bid</div>
                             <div class="text-right" title="Median ask depth across two-sided minutes (group-level)">Ask</div>
                             <div class="text-right">Total Liq</div>
+                            <div class="pl-4 text-right" title="This MM's quoted depth as a % of all tracked MMs' depth on this ticker (sums to ~100% across the MMs below).">% of MM Liq</div>
                             <div class="text-right" title="Maker fill volume in the last 24h (all wallets+subs in the group)">Maker</div>
                             <div class="text-right" title="Taker fill volume in the last 24h">Taker</div>
-                            <div class="pl-4 text-right">Share</div>
-                            <div class="text-right" title="DUMMY: median time an order rests in the book before being replaced/cancelled. Real metric pending.">Time in Book</div>
+                            <div class="text-right" title="How long this MM typically leaves an order before updating its quote, on this ticker (last 24h). Shown as median / p90.">Time in Book (Median / p90)</div>
                           </div>
 
                           {#each detail.mms as mm}
                             {@const share = mmShare(mm, detail)}
                             {@const split = bidAskSplitPct(mm)}
-                            <div class="grid grid-cols-[1.4fr_0.7fr_1fr_1fr_1fr_1fr_1fr_1.2fr_1fr] items-center border-b border-zinc-800/60 px-3 py-1.5 text-xs text-zinc-300 last:border-b-0">
+                            {@const tib = tibForMm(row.ticker, mm.mmSlug)}
+                            <div class="grid grid-cols-[1.4fr_0.7fr_1fr_1fr_1fr_1.2fr_1fr_1fr_1.5fr] items-center border-b border-zinc-800/60 px-3 py-1.5 text-xs text-zinc-300 last:border-b-0">
                               <div class="truncate font-medium text-zinc-200 mono" title={mm.mmSlug}>{mm.displayName}</div>
                               <div class="text-right mono {uptimeClass(mm.uptimePct)}" title={`${mm.twoSidedMinutes} / 1440 two-sided minutes`}>{formatUptime(mm.uptimePct)}</div>
                               <div class="text-right text-zinc-200 mono" title={split ? `${split.bid.toFixed(0)}% of own quoted depth` : ''}>{formatUsd(mm.bidQuotedUsd)}</div>
                               <div class="text-right text-zinc-200 mono" title={split ? `${split.ask.toFixed(0)}% of own quoted depth` : ''}>{formatUsd(mm.askQuotedUsd)}</div>
                               <div class="text-right text-zinc-100 mono">{formatUsd(mm.totalQuotedUsd)}</div>
-                              <div class="text-right text-zinc-300 mono">{formatUsd(mm.makerVolumeUsd24h)}</div>
-                              <div class="text-right {mm.takerVolumeUsd24h > 0 ? 'text-amber-300' : 'text-zinc-500'} mono">{formatUsd(mm.takerVolumeUsd24h)}</div>
                               <div class="pl-4">
                                 <div class="flex items-center gap-2">
                                   <div class="h-1.5 flex-1 overflow-hidden rounded-full bg-zinc-800">
@@ -1676,7 +1825,18 @@
                                   <span class="w-10 text-right text-[10px] text-zinc-400 mono">{formatShare(share)}</span>
                                 </div>
                               </div>
-                              <div class="text-right text-zinc-300 mono" title="DUMMY median time-in-book">{formatTib(dummyTibMs(mm.mmSlug))}</div>
+                              <div class="text-right text-zinc-300 mono">{formatUsd(mm.makerVolumeUsd24h)}</div>
+                              <div class="text-right {mm.takerVolumeUsd24h > 0 ? 'text-amber-300' : 'text-zinc-500'} mono">{formatUsd(mm.takerVolumeUsd24h)}</div>
+                              <div class="text-right mono" title={tibTitle(row.ticker, mm.mmSlug)}>
+                                {#if tib && tib.repriced.medianMs != null}
+                                  <span class="text-zinc-200">{formatTib(tib.repriced.medianMs)}</span>
+                                  <span class="ml-1 text-[10px] text-zinc-500">/ {formatTib(tib.repriced.p90Ms)}</span>
+                                {:else if !$tibData && !$tibError && $tibLoading}
+                                  <span class="text-zinc-600">…</span>
+                                {:else}
+                                  <span class="text-zinc-600">-</span>
+                                {/if}
+                              </div>
                             </div>
                           {/each}
                         {/if}

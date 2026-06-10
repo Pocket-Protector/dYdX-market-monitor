@@ -86,6 +86,7 @@ src/
       mms/  summary/  uptime/[slug]/  liquidity/  liquidity-sla/  depth/  depth-sla/
       fills/  fills-raw/  markets/  overview/
       mm-quotes/{overview,detail}/  pairdepth/overview/
+      trading-hours/{summary,detail}/  time-in-book/{overview,detail}/
       sla/  sla/[slug]/{,liquidity,uptime,config}/
       pnl/  pnl/[slug]/  funding/  funding/[slug]/
       markout/{series,overview,meta}/  markout/mm/[slug]/
@@ -125,6 +126,12 @@ src/
       pairdepth/
         types.ts, schemas.ts   # PairDepthOverviewTicker, PairDepthWindow, ... (no components —
                                # consumed by /overview page)
+      trading-hours/
+        types.ts, schemas.ts   # TradingHoursSummaryTicker/Response, session keys (no components —
+                               # consumed by /overview trading-hours expander)
+      time-in-book/
+        types.ts, schemas.ts   # TibMm/TibTicker/TibDetailResponse (no components —
+                               # consumed by /overview MM-liquidity expander)
       sla/
         types.ts, schemas.ts   # SLATickerRow, SLAUptime/LiquidityResponse
         export.ts              # buildSlaUptimeCsv, buildSlaLiquidityCsv
@@ -247,6 +254,10 @@ external services via `$env/static/private` (plain `fetch`).
 | `GET /api/overview` | — | indexer + apiFetch + CoinGecko (60s cache) |
 | `GET /api/mm-quotes/overview` | — | apiFetch (30s cache) |
 | `GET /api/mm-quotes/detail` | — | apiFetch (30s cache) |
+| `GET /api/trading-hours/summary` | week (optional) | apiFetch (5min cache) |
+| `GET /api/trading-hours/detail` | week (optional) | apiFetch (5min cache) |
+| `GET /api/time-in-book/overview` | — | apiFetch (60s cache) |
+| `GET /api/time-in-book/detail` | — | apiFetch (60s cache) |
 | `GET /api/pairdepth/overview` | — | PAIRDEPTH_API_BASE_URL (30s cache) |
 | `GET /api/mms` | — | apiFetch |
 | `GET /api/summary` | slug, from, to, ticker | apiFetch |
@@ -666,10 +677,26 @@ endpoint) with the global 24h range, not `/api/fills-raw`. This means the
 prefetch does not populate the IndexedDB cache. It only warms the sswr
 in-memory cache. This is a minor inconsistency — acceptable for now.
 
-### Trading sessions on /overview
+### Trading sessions & time-in-book on /overview — now real
 
-The per-session (5 sessions with weights) liquidity/spread/depth/slippage
-breakdown on `/overview` currently uses dummy session data.
+Both formerly-dummy panels on `/overview` are wired to the live `API_BASE_URL`
+service (same host as mm-quotes):
+
+- **Trading-hours expander** (per ticker): `GET /api/trading-hours/summary` →
+  one row per UTC session (the five live sessions; `wholeWeek` is intentionally
+  omitted) showing median quoted USD liquidity + a client-computed **Liq-vs-peak
+  %** (each session's liquidity as a share of the ticker's busiest session, so
+  heavy vs light sessions read at a glance). The real API only exposes liquidity
+  + coverage per session (NOT spread/depth/slippage — those columns were removed).
+  Clicking a session row drills into a per-MM breakdown for that session via
+  `GET /api/trading-hours/detail` (per-MM quoted liquidity, own coverage %, and
+  share-of-session bar, sorted by liquidity).
+- **Time-in-book column** (per MM, inside the MM-liquidity expander):
+  `GET /api/time-in-book/detail` → joined by `${ticker}::${mmSlug}` to show that
+  MM's median + p90 repricing time on that exact ticker (rolling last 24h).
+  `null` median → "—". Percentiles are histogram-approximate (±~10%).
+
+`null ≠ 0` for both feeds — render `null` as "—", never coerce to 0.
 
 ---
 

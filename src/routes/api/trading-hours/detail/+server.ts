@@ -1,0 +1,23 @@
+import { json } from '@sveltejs/kit';
+import type { RequestHandler } from './$types';
+import { apiFetch } from '$lib/api/client';
+import { TradingHoursDetailResponseSchema } from '$lib/features/trading-hours/schemas';
+
+export const GET: RequestHandler = async ({ url }) => {
+  const week = url.searchParams.get('week') ?? undefined;
+  try {
+    const body = await apiFetch(
+      '/api/trading-hours/detail',
+      week ? { week } : undefined,
+      { cacheTtlMs: 300_000 }
+    );
+    const parsed = TradingHoursDetailResponseSchema.parse(body);
+    return json(parsed);
+  } catch {
+    return json({
+      meta: { endpoint: '/api/trading-hours/detail' },
+      data: null,
+      error: 'Trading-hours detail unavailable'
+    });
+  }
+};
