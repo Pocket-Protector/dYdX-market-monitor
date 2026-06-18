@@ -13,14 +13,25 @@ async function fetchSection(fetcher: typeof fetch, request: string): Promise<Res
   }
 }
 
+function clampLeeway(raw: string | null): number {
+  if (raw === null) return 0;
+  const n = Number(raw);
+  if (!Number.isFinite(n)) return 0;
+  return Math.min(100, Math.max(0, n));
+}
+
 export const load: PageLoad = async ({ fetch, url, params, data }) => {
   const from = url.searchParams.get('from') ?? data.defaultFrom;
   const to = url.searchParams.get('to') ?? data.defaultTo;
+  // Leeway relaxes the SLA size requirement by a % when scoring uptime (only affects /uptime).
+  const leeway = clampLeeway(url.searchParams.get('leeway'));
   const rangeParams = new URLSearchParams({ from, to });
+  const uptimeParams = new URLSearchParams({ from, to });
+  if (leeway > 0) uptimeParams.set('leeway', String(leeway));
 
   const [liquidityRes, uptimeRes, configRes] = await Promise.all([
     fetchSection(fetch, `/api/sla/${params.slug}/liquidity?${rangeParams.toString()}`),
-    fetchSection(fetch, `/api/sla/${params.slug}/uptime?${rangeParams.toString()}`),
+    fetchSection(fetch, `/api/sla/${params.slug}/uptime?${uptimeParams.toString()}`),
     fetchSection(fetch, `/api/sla/${params.slug}/config`)
   ]);
 
@@ -55,5 +66,5 @@ export const load: PageLoad = async ({ fetch, url, params, data }) => {
     configData = await configRes.json();
   }
 
-  return { ...data, from, to, liquidityData, liquidityError, uptimeData, uptimeError, configData, configError };
+  return { ...data, from, to, leeway, liquidityData, liquidityError, uptimeData, uptimeError, configData, configError };
 };

@@ -95,6 +95,7 @@ export function buildSlaUptimeCsv(rows: SlaUptimeRow[], mmSlug: string, from: st
   ].join('\n');
 }
 
-export function buildSlaUptimeCsvFilename(mmSlug: string, from: string, to: string): string {
-  return `sla-uptime-${mmSlug}-${from}-${to}.csv`;
+export function buildSlaUptimeCsvFilename(mmSlug: string, from: string, to: string, leeway = 0): string {
+  const leewayTag = leeway > 0 ? `-leeway${leeway}` : '';
+  return `sla-uptime-${mmSlug}-${from}-${to}${leewayTag}.csv`;
 }

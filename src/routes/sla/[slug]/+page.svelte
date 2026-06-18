@@ -5,6 +5,7 @@
   import TableSkeleton from '$lib/shared/components/skeletons/TableSkeleton.svelte';
   import ErrorBanner from '$lib/shared/components/ErrorBanner.svelte';
   import { formatUsd, formatPct, formatBps } from '$lib/utils/format';
+  import { updateParams } from '$lib/utils/params';
   import {
     buildSlaLiquidityCsv, buildSlaLiquidityCsvFilename,
     buildSlaUptimeCsv, buildSlaUptimeCsvFilename
@@ -17,11 +18,31 @@
   const requestedTo = $derived(page.url.searchParams.get('to') ?? data.defaultTo);
   const from = $derived(requestedFrom);
   const to = $derived(requestedTo);
-  const hasMatchingRangeData = $derived(data.from === requestedFrom && data.to === requestedTo);
-  const liquidityData = $derived(hasMatchingRangeData ? data.liquidityData : null);
-  const liquidityError = $derived(hasMatchingRangeData ? data.liquidityError : null);
-  const uptimeData = $derived(hasMatchingRangeData ? data.uptimeData : null);
-  const uptimeError = $derived(hasMatchingRangeData ? data.uptimeError : null);
+
+  // --- Leeway (relaxes SLA size targets by a % when scoring uptime — /uptime only) ---
+  const DEFAULT_LEEWAY = 2;
+  function clampLeeway(n: number): number {
+    if (!Number.isFinite(n)) return 0;
+    return Math.min(100, Math.max(0, n));
+  }
+  const leewayParam = $derived(page.url.searchParams.get('leeway'));
+  const leewayEnabled = $derived(leewayParam !== null);
+  const requestedLeeway = $derived(leewayEnabled ? clampLeeway(Number(leewayParam)) : 0);
+
+  function toggleLeeway() {
+    updateParams({ leeway: leewayEnabled ? null : String(DEFAULT_LEEWAY) });
+  }
+  function commitLeeway(raw: string) {
+    updateParams({ leeway: String(clampLeeway(Number(raw))) });
+  }
+
+  // Liquidity/config depend only on the date range; uptime additionally depends on leeway.
+  const hasMatchingRange = $derived(data.from === requestedFrom && data.to === requestedTo);
+  const hasMatchingUptime = $derived(hasMatchingRange && data.leeway === requestedLeeway);
+  const liquidityData = $derived(hasMatchingRange ? data.liquidityData : null);
+  const liquidityError = $derived(hasMatchingRange ? data.liquidityError : null);
+  const uptimeData = $derived(hasMatchingUptime ? data.uptimeData : null);
+  const uptimeError = $derived(hasMatchingUptime ? data.uptimeError : null);
   const configData = $derived(data.configData);
   const configError = $derived(data.configError);
 
@@ -145,7 +166,7 @@
     const t = to ?? data.defaultTo;
     triggerDownload(
       buildSlaUptimeCsv(uptimeData.rows, data.slug, f, t),
-      buildSlaUptimeCsvFilename(data.slug, f, t)
+      buildSlaUptimeCsvFilename(data.slug, f, t, requestedLeeway)
     );
   }
 </script>
@@ -407,20 +428,71 @@
 
   <!-- Table 3: Uptime Detail -->
   <section class="mt-6 mb-8">
-    <div class="mb-3 flex items-baseline justify-between">
-      <h2 class="flex items-baseline gap-2 text-lg font-semibold text-zinc-100">
+    <div class="mb-3 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+      <h2 class="flex flex-wrap items-baseline gap-2 text-lg font-semibold text-zinc-100">
         Uptime Detail
         <span class="text-sm font-normal text-zinc-500">{rangeDays} days</span>
+        {#if leewayEnabled}
+          <span class="rounded-full border border-violet-500/40 bg-violet-500/10 px-2 py-0.5 text-[11px] font-normal text-violet-200">
+            Leeway {requestedLeeway}% applied
+          </span>
+        {/if}
       </h2>
-      {#if uptimeData}
-        <button
-          type="button"
-          onclick={downloadUptimeCsv}
-          class="rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-200 transition-colors hover:border-zinc-500 hover:text-white"
-        >
-          Download CSV
-        </button>
-      {/if}
+      <div class="flex flex-wrap items-center gap-2">
+        <!-- Leeway control -->
+        <div class="flex items-center gap-2 rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-1.5">
+          <span class="group/lw relative inline-flex items-center gap-1">
+            <span class="text-xs font-medium text-zinc-300">Leeway</span>
+            <span class="cursor-help text-zinc-600 hover:text-zinc-400">ⓘ</span>
+            <span
+              class="pointer-events-none absolute left-0 top-full z-30 mt-1 w-72 rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-left text-[11px] font-normal leading-snug text-zinc-300 opacity-0 shadow-xl transition-opacity group-hover/lw:opacity-100"
+            >
+              <span class="font-semibold text-zinc-100">Leeway SLA Uptime</span> relaxes the required quote
+              <span class="text-zinc-100">size</span> by this percentage when scoring uptime — the spread (bps)
+              bands are unchanged. E.g. 2% turns a $10,000 target into $9,800. The
+              <span class="text-zinc-100">L1/L2 USD</span> columns below show the reduced (effective) sizes, and
+              uptime % is scored against them. Uptime can only stay the same or rise versus 0% — never fall.
+            </span>
+          </span>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={leewayEnabled}
+            aria-label="Toggle leeway SLA uptime"
+            onclick={toggleLeeway}
+            class="relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors {leewayEnabled
+              ? 'bg-violet-600'
+              : 'bg-zinc-700'}"
+          >
+            <span
+              class="inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform {leewayEnabled
+                ? 'translate-x-[18px]'
+                : 'translate-x-0.5'}"
+            ></span>
+          </button>
+          {#if leewayEnabled}
+            <input
+              type="number"
+              min="0"
+              max="100"
+              step="0.5"
+              value={requestedLeeway}
+              onchange={(e) => commitLeeway(e.currentTarget.value)}
+              class="w-14 rounded border border-zinc-700 bg-zinc-950 px-2 py-1 text-right text-xs text-zinc-100 focus:border-violet-500 focus:outline-none"
+            />
+            <span class="text-xs text-zinc-500">%</span>
+          {/if}
+        </div>
+        {#if uptimeData}
+          <button
+            type="button"
+            onclick={downloadUptimeCsv}
+            class="rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-200 transition-colors hover:border-zinc-500 hover:text-white"
+          >
+            Download CSV
+          </button>
+        {/if}
+      </div>
     </div>
     {#if uptimeError}
       <ErrorBanner message="Failed to load uptime data." />
@@ -470,7 +542,7 @@
                   </button>
                   <span class="cursor-help text-zinc-600 hover:text-zinc-400">ⓘ</span>
                   <span class="pointer-events-none absolute right-0 top-full z-20 mt-1 w-56 rounded-lg border border-zinc-700 bg-zinc-900 px-2.5 py-2 text-left text-[11px] font-normal leading-snug text-zinc-300 opacity-0 shadow-xl transition-opacity group-hover/tip:opacity-100">
-                    Required liquidity depth in USD at the L1 spread level, as defined in the SLA.
+                    Required liquidity depth in USD at the L1 spread level, as defined in the SLA. When leeway is on, this shows the reduced (post-leeway) target.
                   </span>
                 </span>
               </th>
@@ -514,7 +586,7 @@
                   </button>
                   <span class="cursor-help text-zinc-600 hover:text-zinc-400">ⓘ</span>
                   <span class="pointer-events-none absolute right-0 top-full z-20 mt-1 w-56 rounded-lg border border-zinc-700 bg-zinc-900 px-2.5 py-2 text-left text-[11px] font-normal leading-snug text-zinc-300 opacity-0 shadow-xl transition-opacity group-hover/tip:opacity-100">
-                    Required liquidity depth in USD at the L2 spread level, as defined in the SLA.
+                    Required liquidity depth in USD at the L2 spread level, as defined in the SLA. When leeway is on, this shows the reduced (post-leeway) target.
                   </span>
                 </span>
               </th>
